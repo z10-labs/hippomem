@@ -13,7 +13,7 @@ import itertools
 
 import pytest
 
-from hippomem import db, embedding, systems
+from hippomem import db, embedding, judge, systems
 
 DIMS = 64
 
@@ -31,6 +31,29 @@ def fake_embed(text: str) -> list[float]:
 @pytest.fixture(autouse=True)
 def stub_embeddings(monkeypatch):
     monkeypatch.setattr(embedding, "embed", fake_embed)
+
+
+class JudgeStub:
+    """Stands in for the model. Tests set `reply` (a dict, or a function of
+    the prompt) or `error`; every prompt sent is kept in `prompts`."""
+
+    def __init__(self) -> None:
+        self.reply: object = None
+        self.error = "no judge reply set in this test"
+        self.prompts: list[str] = []
+
+    def __call__(self, prompt: str) -> dict:
+        self.prompts.append(prompt)
+        if self.reply is None:
+            raise judge.JudgeError(self.error)
+        return self.reply(prompt) if callable(self.reply) else dict(self.reply)  # type: ignore[call-overload]
+
+
+@pytest.fixture(autouse=True)
+def judge_stub(monkeypatch):
+    stub = JudgeStub()
+    monkeypatch.setattr(judge, "run", stub)
+    return stub
 
 
 @pytest.fixture(autouse=True)

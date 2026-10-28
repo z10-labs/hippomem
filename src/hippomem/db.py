@@ -21,6 +21,7 @@ MIGRATIONS: list[str] = [
         kind        TEXT NOT NULL CHECK (kind IN ('engineer', 'reviewer', 'admin')),
         name        TEXT NOT NULL,
         token_hash  TEXT UNIQUE,
+        emails      TEXT NOT NULL DEFAULT '',    -- comma-separated git author emails
         created_at  TEXT NOT NULL
     );
 
@@ -69,23 +70,30 @@ MIGRATIONS: list[str] = [
     -- A branch name can be reused once the earlier branch has ended.
     CREATE UNIQUE INDEX branch_active ON branch (repo, name) WHERE state = 'active';
 
+    -- What an agent or engineer decided, or is weighing, while working on a
+    -- branch. Drafts are unreviewed. Merge reconciliation or closing the
+    -- branch turns them into proposals, rejected alternatives, explored
+    -- records or nothing.
     CREATE TABLE draft (
         id              INTEGER PRIMARY KEY,
         branch_id       INTEGER NOT NULL REFERENCES branch(id),
-        kind            TEXT NOT NULL CHECK (kind IN ('decided', 'reversed', 'considering')),
+        kind            TEXT NOT NULL CHECK (kind IN ('decided', 'considering')),
         title           TEXT NOT NULL,
         statement       TEXT NOT NULL DEFAULT '',
         why             TEXT NOT NULL DEFAULT '',
-        reverses        INTEGER REFERENCES draft(id),
         scope           TEXT NOT NULL CHECK (scope IN ('code', 'system', 'team')),
         system_id       TEXT REFERENCES system(id),
         paths           TEXT NOT NULL DEFAULT '[]',   -- JSON list of repo-relative paths
         engineer        TEXT NOT NULL,
         agent           TEXT NOT NULL DEFAULT '',
         session_id      TEXT NOT NULL DEFAULT '',
-        status          TEXT NOT NULL CHECK (status IN ('open', 'backed', 'proposed', 'rejected_alternative', 'dropped', 'explored')),
-        backed_by       TEXT,                         -- commit sha
+        status          TEXT NOT NULL CHECK (status IN ('open', 'dropped', 'proposed', 'alternative', 'discarded', 'explored')),
+        dropped_reason  TEXT NOT NULL DEFAULT '',
+        replaced_by     INTEGER REFERENCES draft(id),
+        backed_by       TEXT,                         -- first commit after the draft that touched its paths
+        outcome         TEXT,                         -- proposal or explored id it became
         created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL,
         embedding       BLOB
     );
 
