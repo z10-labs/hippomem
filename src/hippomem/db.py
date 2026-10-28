@@ -21,6 +21,7 @@ MIGRATIONS: list[str] = [
         kind        TEXT NOT NULL CHECK (kind IN ('engineer', 'reviewer', 'admin')),
         name        TEXT NOT NULL,
         token_hash  TEXT UNIQUE,
+        emails      TEXT NOT NULL DEFAULT '',    -- comma-separated git author emails
         created_at  TEXT NOT NULL
     );
 

@@ -169,6 +169,87 @@ def _register_tools(mcp: FastMCP, mem: service.Memory) -> None:
         """Record your engineer's answer on a proposal. Only call this after they said yes or no."""
         return service.decide(mem, _ctx_actor(mem, ctx), proposal_id, accept, note)
 
+    @mcp.tool()
+    def hippomem_draft(
+        title: str,
+        why: str,
+        ctx: Context,
+        kind: str = "decided",
+        statement: str = "",
+        scope: str = "code",
+        system: str = "",
+        paths: list[str] | None = None,
+        replaces: int | None = None,
+        replaced_because: str = "",
+        repo: str = "",
+        branch: str = "",
+        session: str = "",
+    ) -> str:
+        """Record a decision the moment you make it, with the reason. Cheap and unreviewed.
+
+        kind: "decided" or "considering". To reverse an earlier draft, draft the new
+        choice with replaces=<old draft id> and replaced_because=<why the old one was dropped>.
+        scope: "code" (default), or "system"/"team" for a rule covering a whole module,
+        service or team. paths: repo-relative files or folders the decision is about.
+        """
+        try:
+            return service.draft(
+                mem,
+                _ctx_actor(mem, ctx),
+                title=title,
+                why=why,
+                kind=kind,
+                statement=statement,
+                scope=scope,
+                system=system,
+                paths=paths,
+                replaces=replaces,
+                replaced_because=replaced_because,
+                repo=repo,
+                branch=branch,
+                session_id=session,
+            )
+        except ValueError as err:
+            return f"Not drafted: {err}"
+
+    @mcp.tool()
+    def hippomem_drop(draft_id: int, why: str, ctx: Context) -> str:
+        """Drop an earlier draft without replacing it. Say why: that reason is what's worth keeping."""
+        try:
+            return service.drop(mem, _ctx_actor(mem, ctx), draft_id, why)
+        except ValueError as err:
+            return f"Not dropped: {err}"
+
+    @mcp.tool()
+    def hippomem_trail(ctx: Context, repo: str = "", branch: str = "", session: str = "") -> str:
+        """The drafts on this branch so far, including what was dropped and why."""
+        return service.trail(mem, _ctx_actor(mem, ctx), repo, branch, session)
+
+    @mcp.tool()
+    def hippomem_ask_author(repo: str, path: str, question: str, ctx: Context, author_email: str = "") -> str:
+        """Ask the engineer who wrote a file why it's built the way it is, before changing how it works.
+
+        Use when the before-edit lookup says no decision covers the file. Their answer
+        comes back as a proposal anchored to the file.
+        """
+        history = {"top_author_email": author_email} if author_email else {}
+        try:
+            return service.ask_author(mem, _ctx_actor(mem, ctx), repo, path, question, history)
+        except ValueError as err:
+            return f"Not asked: {err}"
+
+    @mcp.tool()
+    def hippomem_answer(question_id: str, title: str, why: str, ctx: Context, alternatives: list[dict] | None = None) -> str:
+        """Record your engineer's answer to a teammate's question about code they wrote.
+
+        title: the decision in a few words. why: their reason. alternatives:
+        [{"option": "...", "reason": "why rejected"}] if they mentioned any.
+        """
+        try:
+            return service.answer_question(mem, _ctx_actor(mem, ctx), question_id, title, why, alternatives)
+        except (ValueError, KeyError) as err:
+            return f"Not recorded: {err}"
+
 
 def _register_api(mcp: FastMCP, mem: service.Memory) -> None:
     def authed(handler: Any) -> Any:
@@ -213,3 +294,25 @@ def _register_api(mcp: FastMCP, mem: service.Memory) -> None:
     mcp.custom_route("/api/decide", methods=["POST"])(authed(decide))
     mcp.custom_route("/api/decision", methods=["GET"])(authed(get))
     mcp.custom_route("/api/decisions", methods=["GET"])(authed(listing))
+
+    def session_start(actor: Actor, body: dict, request: Request) -> dict:
+        return {"text": service.session_start(mem, actor, body["session_id"], body["repo"], body.get("branch", ""))}
+
+    def lookup(actor: Actor, body: dict, request: Request) -> dict:
+        return {"text": service.lookup(mem, actor, body.get("session_id", ""), body["repo"], body["path"], body.get("history"))}
+
+    def turn_start(actor: Actor, body: dict, request: Request) -> dict:
+        service.turn_start(mem, actor, body["session_id"])
+        return {"ok": True}
+
+    def turn_stop(actor: Actor, body: dict, request: Request) -> dict:
+        return {"reason": service.turn_stop(mem, actor, body["session_id"], list(body.get("changed", [])))}
+
+    def event(actor: Actor, body: dict, request: Request) -> dict:
+        return service.git_event(mem, actor, body)
+
+    mcp.custom_route("/api/session/start", methods=["POST"])(authed(session_start))
+    mcp.custom_route("/api/lookup", methods=["POST"])(authed(lookup))
+    mcp.custom_route("/api/turn/start", methods=["POST"])(authed(turn_start))
+    mcp.custom_route("/api/turn/stop", methods=["POST"])(authed(turn_stop))
+    mcp.custom_route("/api/event", methods=["POST"])(authed(event))
