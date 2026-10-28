@@ -3,14 +3,14 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hippocampus-mcp"
-version = "0.2.0"
-description = "Decision memory for AI coding agents, as an MCP server"
+name = "hippomem"
+version = "0.3.0"
+description = "A team's engineering memory for AI coding agents: the decisions behind the software, and the options rejected"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "z10 labs" }]
-keywords = ["mcp", "ai-agents", "decision-records", "adr", "llm", "codebase-memory"]
+keywords = ["mcp", "ai-agents", "decision-records", "adr", "engineering-memory", "llm"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -20,12 +20,15 @@ classifiers = [
     "Topic :: Software Development :: Documentation",
 ]
 dependencies = [
-    # No upper bound: server.py shims the mcp 2.0.0 rename of FastMCP to
-    # MCPServer (mcp.server.fastmcp -> mcp.server), so both 1.x and 2.x work.
-    # See WP-12.
-    "mcp>=1.0.0",
+    # Pinned below 2.0: the streamable HTTP transport and the per-request
+    # context used for identity differ in 2.x. See BD-07 in
+    # docs/build-decisions.md.
+    "mcp>=1.25,<2",
     "fastembed>=0.4.0",
     "numpy>=1.26.0",
+    "starlette>=0.40",
+    "uvicorn>=0.30",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
@@ -37,12 +40,12 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/z10-labs/hippocampus"
-Repository = "https://github.com/z10-labs/hippocampus"
-Issues = "https://github.com/z10-labs/hippocampus/issues"
+Homepage = "https://github.com/z10-labs/hippomem"
+Repository = "https://github.com/z10-labs/hippomem"
+Issues = "https://github.com/z10-labs/hippomem/issues"
 
 [project.scripts]
-hippocampus-mcp = "hippocampus.server:main"
+hippomem = "hippomem.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -53,27 +56,14 @@ addopts = "-q"
 
 [tool.ruff]
 target-version = "py311"
-# 150 rather than the default 88: this codebase has a few dense regex
-# alternations (classify.py) that would only get harder to read if wrapped.
 line-length = 150
 
 [tool.ruff.lint]
-# Conservative baseline (pycodestyle errors/warnings + pyflakes) rather than
-# ruff's full default rule set, which includes isort- and pylint-style rules
-# this codebase's existing conventions don't follow (e.g. single blank lines
-# between test functions). Widen this once there's a reason to.
+# Conservative baseline (pycodestyle errors/warnings + pyflakes). Widen this
+# once there's a reason to.
 select = ["E", "F", "W"]
 
 [tool.mypy]
-# No explicit python_version: let mypy infer it from whichever interpreter
-# actually runs it. CI runs mypy across a 3.11/3.12 matrix (same job that
-# runs pytest) — pinning one version here made mypy assume 3.11 syntax
-# rules even under the 3.12 job, which broke when a newer numpy release's
-# bundled .pyi stubs started using the `type` statement (PEP 695, 3.12+
-# only): a real target/interpreter mismatch, not a numpy bug.
-#
-# Non-strict to start: the codebase is fully annotated already and mypy is
-# already clean under this config, but tightening (disallow_untyped_defs,
-# etc.) is deliberately deferred rather than chased in this pass — get the
-# gate in place first.
+# No explicit python_version: let mypy infer it from the interpreter that
+# runs it (CI runs a 3.11/3.12 matrix).
 ignore_missing_imports = true
