@@ -43,12 +43,22 @@ def on_commit(
     return result
 
 
-def on_merge(conn: sqlite3.Connection, policy: Policy, repo: str, merged_branch: str, into: str, diff: str, commits: list[str]) -> dict:
+def on_merge(
+    conn: sqlite3.Connection,
+    policy: Policy,
+    repo: str,
+    merged_branch: str,
+    into: str,
+    diff: str,
+    commits: list[str],
+    history: str = "",
+    merged_by: str = "",
+) -> dict:
     branch = drafts.find_active(conn, repo, merged_branch)
     if branch is None:
         reconcile.log_event(conn, "merge_unknown_branch", repo, merged_branch, into=into)
         return {"ignored": f"no active branch {merged_branch!r} in {repo}"}
-    outcome = reconcile.merge(conn, policy, branch.id, diff, commits)
+    outcome = reconcile.merge(conn, policy, branch.id, diff, commits, history=history, merged_by=merged_by)
     return {
         "proposals": list(outcome.proposals),
         "alternatives": list(outcome.alternatives),
