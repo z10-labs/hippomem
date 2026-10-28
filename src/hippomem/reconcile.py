@@ -23,6 +23,7 @@ from hippomem import db, drafts, explored, judge, proposals, systems
 from hippomem.policy import Policy
 
 MAX_DIFF_CHARS = 60_000
+MAX_HISTORY_CHARS = 30_000
 
 
 @dataclass(frozen=True)
@@ -67,19 +68,28 @@ Branch: {branch}
 Drafts:
 {drafts}
 
+Commit history of the branch, oldest first (may be truncated). Use it to spot options that were built and then
+reversed even if nobody drafted them:
+{history}
+
 Diff of the merge (may be truncated):
 {diff}
 
 Give exactly one verdict per draft id:
 - "built": the diff implements this decision. Include "title" (short), "statement" (one sentence, what is now true),
   "why" (the reason, from the draft), "weight" ("heavy" for architecture, data model, security or cross-service
-  choices, else "standard"), and "files" (repo paths or globs the decision governs).
+  choices, else "standard"), "files" (repo paths or globs the decision governs), and "alternatives": options the
+  commit history shows were tried and reversed for this decision, as [{{"option": ..., "reason": ...}}] (empty if none).
 - "alternative": a dropped option that lost to a built draft. Include "of" (the built draft id) and "reason" (why it lost).
 - "explored": a dropped dead end with a lasting lesson that is not just an alternative of a built draft. Include "tried",
   "outcome", "why", and "revisit_if" (what would make it worth trying again).
 - "discard": noise, renaming, trivia, or not built.
 
-Reply with only JSON: {{"drafts": [{{"id": 1, "verdict": "built", ...}}, ...]}}
+Then list "undrafted": real engineering decisions the history and diff show were made but no draft covers (an approach
+chosen, often after reversing another). Leave out trivia. Each: "title", "statement", "why" (from commit messages and
+code; say "not recorded" rather than invent), "weight", "files", "alternatives" as above.
+
+Reply with only JSON: {{"drafts": [{{"id": 1, "verdict": "built", ...}}, ...], "undrafted": [...]}}
 """
 
 CLOSE_PROMPT = """A branch was closed without merging. Sort its draft trail: keep only dead ends that taught something lasting.
@@ -98,10 +108,22 @@ Reply with only JSON: {{"drafts": [{{"id": 1, "verdict": "explored", ...}}, ...]
 """
 
 
-def merge(conn: sqlite3.Connection, policy: Policy, branch_id: int, diff: str, commits: list[str], keep_branch_open: bool = False) -> Outcome:
-    """Reconcile a branch's trail with the merged diff. With `keep_branch_open`
-    (commits straight onto a default branch) only backed drafts are judged and
-    the branch stays active."""
+def merge(
+    conn: sqlite3.Connection,
+    policy: Policy,
+    branch_id: int,
+    diff: str,
+    commits: list[str],
+    keep_branch_open: bool = False,
+    history: str = "",
+    merged_by: str = "",
+) -> Outcome:
+    """Reconcile a branch's trail with the merged diff and commit history.
+
+    With `keep_branch_open` (commits straight onto a default branch) only
+    backed drafts are judged and the branch stays active. Decisions the
+    history shows but nobody drafted become proposals from `merged_by`.
+    """
     branch = drafts.get_branch(conn, branch_id)
     trail = drafts.trail(conn, branch_id)
     if keep_branch_open:
@@ -116,23 +138,32 @@ def merge(conn: sqlite3.Connection, policy: Policy, branch_id: int, diff: str, c
         notes.append(f"{len(scope_drafts)} module/service/team-wide drafts sent for an owner to confirm")
 
     verdicts: dict[int, dict] = {}
+    undrafted: list[dict] = []
     error = ""
-    if code_trail:
+    if code_trail or (history and not keep_branch_open):
         try:
             reply = judge.run(
                 MERGE_PROMPT.format(
                     repo=branch.repo,
                     branch=branch.name,
-                    drafts=json.dumps([_draft_json(d) for d in code_trail], indent=1),
+                    drafts=json.dumps([_draft_json(d) for d in code_trail], indent=1) if code_trail else "(none)",
+                    history=history[:MAX_HISTORY_CHARS] or "(not available)",
                     diff=diff[:MAX_DIFF_CHARS],
                 )
             )
             verdicts = {int(v["id"]): v for v in reply.get("drafts", []) if "id" in v}
+            undrafted = [u for u in reply.get("undrafted", []) if isinstance(u, dict) and str(u.get("title", "")).strip()]
         except (judge.JudgeError, KeyError, ValueError, TypeError) as err:
             error = str(err)
             log_event(conn, "judge_failed", branch.repo, branch.name, stage="merge", error=error)
 
     outcome = _apply_merge(conn, policy, branch, code_trail, verdicts, commits)
+    found = [_undrafted_proposal(conn, policy, branch, u, commits, merged_by) for u in undrafted]
+    if found:
+        notes.append(f"{len(found)} decisions found in the history that nobody drafted")
+        outcome = Outcome(
+            proposals=outcome.proposals + tuple(found), alternatives=outcome.alternatives, explored=outcome.explored, discarded=outcome.discarded
+        )
     if not keep_branch_open:
         drafts.end_branch(conn, branch_id, "merged")
     log_event(conn, "merged", branch.repo, branch.name, proposals=created + list(outcome.proposals), commits=commits, judged=not error)
@@ -187,7 +218,7 @@ def _apply_merge(
     for d in trail:
         v = resolved[d.id]
         if v.get("verdict") == "built":
-            pid = _built_proposal(conn, policy, branch, d, v, alternatives_of.get(d.id, []), commits)
+            pid = _built_proposal(conn, policy, branch, d, v, _merge_alternatives(alternatives_of.get(d.id, []), v.get("alternatives")), commits)
             proposal_of[d.id] = pid
             made_proposals.append(pid)
             drafts.set_outcome(conn, d.id, "proposed", pid)
@@ -207,6 +238,49 @@ def _apply_merge(
             drafts.set_outcome(conn, d.id, "discarded")
             discarded.append(d.id)
     return Outcome(proposals=tuple(made_proposals), alternatives=tuple(alternatives), explored=tuple(made_explored), discarded=tuple(discarded))
+
+
+def _merge_alternatives(from_trail: list[dict], from_judge: object) -> list[dict]:
+    """Alternatives from reversed drafts, plus any the judge found in the history, without duplicates."""
+    merged = list(from_trail)
+    seen = {a["option"].strip().lower() for a in merged}
+    for alt in from_judge if isinstance(from_judge, list) else []:
+        if isinstance(alt, dict) and str(alt.get("option", "")).strip() and alt["option"].strip().lower() not in seen:
+            merged.append({"option": str(alt["option"]), "reason": str(alt.get("reason") or "reversed during work")})
+            seen.add(alt["option"].strip().lower())
+    return merged
+
+
+def _undrafted_proposal(conn: sqlite3.Connection, policy: Policy, branch: drafts.Branch, u: dict, commits: list[str], merged_by: str) -> str:
+    """A decision the history shows but nobody drafted. Proposed by whoever
+    merged, marked so a reviewer knows it was inferred, not stated."""
+    files = [str(f) for f in u.get("files", []) if str(f).strip()]
+    payload = {
+        "title": str(u["title"]),
+        "statement": str(u.get("statement") or u["title"]),
+        "why": str(u.get("why") or "not recorded"),
+        "scope": "code",
+        "systems": systems.systems_for(conn, branch.repo, files[0] if files else None),
+        "anchors": [{"repo": branch.repo, "path_glob": f} for f in files],
+        "alternatives": _merge_alternatives([], u.get("alternatives")),
+        "implemented": True,
+        "inferred": True,
+        "evidence": [{"kind": "commit", "ref": c} for c in commits]
+        + [{"kind": "branch", "ref": f"{branch.repo}:{branch.name}", "note": "inferred from history, not drafted"}],
+    }
+    weight = str(u["weight"]) if u.get("weight") in ("standard", "heavy") else "standard"
+    p = proposals.create(
+        conn,
+        policy,
+        kind="new",
+        payload=payload,
+        source="reconciliation",
+        proposed_by=merged_by or "unknown",
+        proposed_via="git",
+        weight=weight,
+        branch_id=branch.id,
+    )
+    return p.id
 
 
 def _systems_for_draft(conn: sqlite3.Connection, branch: drafts.Branch, d: drafts.Draft, files: list[str]) -> list[str]:

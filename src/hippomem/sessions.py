@@ -237,8 +237,9 @@ def lookup(conn: sqlite3.Connection, policy: Policy, actor: Actor, session_id: s
         lines.append(
             f"No recorded decision covers {path}. It has {history['commits']} commits, mostly by {author}"
             + (f"; last change {last.get('date')} '{last.get('subject')}'" if last else "")
-            + ". If you're about to change how it works, not just add to it, ask its author why it's built this way:"
-            f' hippomem_ask_author(repo="{repo}", path="{path}", question=...).'
+            + ". Before you change how it works (not just add to it), call"
+            f' hippomem_ask_author(repo="{repo}", path="{path}", question=...) so the reason behind the current design'
+            " gets recorded. You don't have to wait for the answer; mention the open question in your summary."
         )
         conn.execute(
             "INSERT INTO usage (actor, agent, action, repo, detail, at) VALUES (?, ?, 'ask_author_hint', ?, ?, ?)",
@@ -273,14 +274,21 @@ def decision_shaped(files: list[str]) -> list[str]:
 def turn_stop(conn: sqlite3.Connection, session_id: str, changed: list[str]) -> str:
     """A reason to keep the agent going for one more step, or '' to let it stop.
 
-    Nudges at most once per turn, and only when decision-shaped files changed
-    and nothing was drafted on the branch during the turn.
+    Nudges at most once per turn, when nothing was drafted on the branch during
+    the turn and either decision-shaped files changed or the turn committed
+    code. A commit with no draft is the common case of a code-level decision
+    made silently (BD-33).
     """
     session = get(conn, session_id)
     if session.stop_nudged or not session.turn_started_at or session.branch_id is None:
         return ""
     shaped = decision_shaped(changed)
-    if not shaped:
+    branch = drafts.get_branch(conn, session.branch_id)
+    committed = conn.execute(
+        "SELECT COUNT(*) FROM event WHERE kind = 'commit' AND repo = ? AND branch = ? AND at >= ?",
+        (branch.repo, branch.name, session.turn_started_at),
+    ).fetchone()[0]
+    if not shaped and not committed:
         return ""
     drafted = conn.execute(
         "SELECT COUNT(*) FROM draft WHERE branch_id = ? AND engineer = ? AND (created_at >= ? OR updated_at >= ?)",
@@ -289,10 +297,11 @@ def turn_stop(conn: sqlite3.Connection, session_id: str, changed: list[str]) -> 
     if drafted:
         return ""
     conn.execute("UPDATE session SET stop_nudged = 1 WHERE id = ?", (session_id,))
+    what = f"changed {', '.join(shaped[:5])}" if shaped else "committed code"
     return (
-        f"Hippomem: this turn changed {', '.join(shaped[:5])}, which usually means a decision was made "
-        "(a dependency, schema, infrastructure or wiring choice), but nothing was drafted. If you chose or dropped "
-        "something, record it now with hippomem_draft and the reason. If not, just finish."
+        f"Hippomem: this turn {what} but drafted nothing. If you chose an approach, or dropped one you'd started "
+        "(for example storing a value versus computing it, or one library over another), record it now with "
+        "hippomem_draft and the reason; use replaces= for anything you reversed. If there was no real choice, just finish."
     )
 
 

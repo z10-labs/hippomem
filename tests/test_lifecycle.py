@@ -224,3 +224,47 @@ def test_extract_json_handles_fenced_replies():
         judge.extract_json("no json here")
     with pytest.raises(judge.JudgeError):
         judge.extract_json("{not: json}")
+
+
+def test_merge_records_decisions_only_the_history_shows(conn, judge_stub):
+    trail_branch(conn)
+    judge_stub.reply = {
+        "drafts": [],
+        "undrafted": [
+            {
+                "title": "Refund deadline is computed from delivered_at",
+                "why": "a stored deadline went stale when delivery dates were corrected",
+                "files": ["src/billing/orders.py"],
+                "alternatives": [{"option": "Store refund_deadline on the order", "reason": "goes stale"}],
+            },
+            {"title": " "},
+        ],
+    }
+    result = lifecycle.on_merge(
+        conn,
+        POLICY,
+        "product-api",
+        "feat/refund-window",
+        "main",
+        "diff",
+        ["c1"],
+        history="--- commit a store\n--- commit b compute",
+        merged_by="@alex",
+    )
+    assert len(result["proposals"]) == 1
+    p = proposals.get(conn, result["proposals"][0])
+    assert (p.proposed_by, p.proposed_via, p.payload["inferred"]) == ("@alex", "git", True)
+    assert p.payload["alternatives"] == [{"option": "Store refund_deadline on the order", "reason": "goes stale"}]
+    assert "--- commit b compute" in judge_stub.prompts[0]
+
+
+def test_judge_alternatives_join_the_trail_alternatives_without_duplicates(conn, judge_stub):
+    b = trail_branch(conn)
+    lost = add(conn, b, "Redis counters")
+    won = add(conn, b, "Postgres locks", replaces=lost, replaced_because="another service")
+    judge_stub.reply = {
+        "drafts": [built(won, alternatives=[{"option": "redis counters", "reason": "dup"}, {"option": "In-memory", "reason": "replicas"}])]
+    }
+    result = lifecycle.on_merge(conn, POLICY, "product-api", "feat/refund-window", "main", "diff", [])
+    options = [a["option"] for a in proposals.get(conn, result["proposals"][0]).payload["alternatives"]]
+    assert options == ["Redis counters", "In-memory"]
