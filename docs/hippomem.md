@@ -231,6 +231,8 @@ Retrieval keeps what the proof of concept got right: similarity search with a re
 
 We prove the concept on our own machines first. The end goal is a remote memory the whole team's agents share; deployment comes after the proof.
 
+> **Status (2026-10-28):** phases 1–4 are built (PRs 15, 16, 17) and checked end to end by the scenario harness in `scenarios/` with real headless agents (PR 18; results in [scenario-results.md](scenario-results.md)). Phase 5, the pilot on real repos, is next and needs the owner. Build choices are in [build-decisions.md](build-decisions.md); the design as built is in [architecture.md](architecture.md).
+
 **1. Reframe.** This document. Rename the package, CLI and README from Hippocampus to Hippomem.
 
 **2. Model and store.** A fresh schema: system, repo mapping, branch, draft, decision, version, link, rejected alternative, explored record, constraint, evidence, proposal. Move search and link-following onto it. No import of the proof of concept's markdown records, and no backfill from past PRs.
