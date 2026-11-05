@@ -93,7 +93,7 @@ hippomem install git-hooks                  # post-checkout, post-commit, post-m
 **What the coding agent gets:**
 
 - **At session start:** a digest with the repo, branch and session to pass to tools; decisions in force for the repo's systems; this branch's draft trail; other branches' drafts on the same systems; up to `max_per_session` proposals and any questions waiting for its engineer.
-- **Before an edit:** decisions covering the file, system- and team-wide rules that apply, open proposals about it, and, when nothing covers a file someone else wrote, a suggestion to ask its author.
+- **Before an edit:** decisions covering the file, system-wide rules that apply (team-wide ones are in the digest), open proposals about it, and, when nothing covers a file someone else wrote that has several commits or hasn't been touched for 90 days, a suggestion to ask its author.
 - **Tools:** `hippomem_query`, `hippomem_draft`, `hippomem_drop`, `hippomem_trail`, `hippomem_get`, `hippomem_chain`, `hippomem_list`, `hippomem_systems`, `hippomem_propose`, `hippomem_propose_mapping`, `hippomem_ask_author`, `hippomem_answer`, `hippomem_review`, `hippomem_decide`.
 - **At the end of every turn:** if dependencies, schema or infrastructure files changed and nothing was drafted, one nudge to draft.
 - **Identity:** everything it writes is recorded as `@alex via claude-code`.
@@ -105,6 +105,7 @@ hippomem install git-hooks                  # post-checkout, post-commit, post-m
 - Checking out a branch starts its draft trail. Drafts belong to the branch, so the next session on it picks up where the last one stopped.
 - Commits mark drafts as backed by code.
 - Merging into the default branch reconciles the trail: drafts that were built become proposals with the commits as evidence; drafts dropped along the way become their rejected alternatives; lasting dead ends become explored records.
+- **Replacing a decision in force:** an agent passes `supersedes=D-…` when it drafts the new choice (drafting also names decisions in force that look related). At merge the judge checks every built draft against the decisions in force: one that replaces a decision becomes a *supersession*, and accepting it takes the old decision out of force (with the date) and links the two; one that only repeats a decision becomes more evidence for it. `hippomem_get` shows a decision's lineage: what it replaced and what replaced it, with when each was in force.
 - An abandoned branch: `hippomem branch close <branch>`. Branches idle longer than `stale_after_days` are closed when the server starts, or with `hippomem branch close-stale`.
 
 ## Reviewer agents

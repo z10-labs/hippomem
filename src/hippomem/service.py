@@ -74,7 +74,7 @@ def get_decision(mem: Memory, actor: Actor, decision_id: str) -> str:
             d = decisions.get(mem.conn, decision_id)
         except KeyError:
             return f"No decision {decision_id}."
-        lines = [render.decision_full(d)]
+        lines = [render.decision_full(d), *render.lineage(search.lineage(mem.conn, decision_id), decision_id)]
         for ev in decisions.evidence_for(mem.conn, decision_id):
             lines.append(f"  Evidence: {ev['kind']} {ev['ref']} {ev['note']}".rstrip())
         return "\n".join(lines)

@@ -178,3 +178,17 @@ def test_accepting_without_reconciliation_still_records_supersession(conn):
     )
     proposals.accept(conn, POLICY, p.id, ALEX)
     assert decisions.get(conn, old).status == "superseded"
+
+
+def test_get_shows_the_lineage_with_dates(conn, monkeypatch):
+    mem = service.Memory(conn=conn, config=config.Config())
+    monkeypatch.setattr(db, "now", lambda: "2026-01-20T09:00:00Z")
+    first = accepted_decision(conn, "Batches of 100", "5 requests a second")
+    monkeypatch.setattr(db, "now", lambda: "2026-02-23T09:00:00Z")
+    payload = {"title": "One by one, 20 at a time", "why": "limit raised to 50/s"}
+    p = proposals.create(conn, POLICY, kind="supersede", target=first, payload=payload, source="agent", proposed_by="@sam")
+    second = proposals.accept(conn, POLICY, p.id, ALEX)
+    text = service.get_decision(mem, ALEX_AGENT, first)
+    assert f"→ {first}  Batches of 100: from 2026-01-20 until 2026-02-23" in text
+    assert f"{second}  One by one, 20 at a time: from 2026-02-23 (in force)" in text
+    assert [d.id for d in search.lineage(conn, second)] == [first, second]

@@ -193,6 +193,27 @@ def _draft_hits(conn: sqlite3.Connection, q: np.ndarray, branch_id: int | None) 
     return hits[:MAX_DRAFTS]
 
 
+def lineage(conn: sqlite3.Connection, decision_id: str) -> list[decisions.Decision]:
+    """The chain of supersessions through a decision, oldest first: what it
+    replaced, itself, and what replaced it, each with when it was in force."""
+
+    def step(current: str, column: str, other: str) -> str | None:
+        row = conn.execute(f"SELECT {other} FROM link WHERE type = 'supersedes' AND {column} = ? ORDER BY {other} LIMIT 1", (current,)).fetchone()
+        return row[0] if row else None
+
+    older: list[str] = []
+    current = decision_id
+    while (prev := step(current, "from_id", "to_id")) and prev not in older and prev != decision_id:
+        older.append(prev)
+        current = prev
+    newer: list[str] = []
+    current = decision_id
+    while (nxt := step(current, "to_id", "from_id")) and nxt not in newer and nxt != decision_id:
+        newer.append(nxt)
+        current = nxt
+    return [decisions.get(conn, i) for i in [*reversed(older), decision_id, *newer]]
+
+
 def chain(conn: sqlite3.Connection, decision_id: str, max_depth: int = 5) -> dict:
     """What a decision depends on (outbound) and what would be affected if it
     changed (inbound), followed transitively."""

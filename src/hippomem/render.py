@@ -131,6 +131,18 @@ def proposal_full(p: Proposal) -> str:
     return "\n".join(lines)
 
 
+def lineage(chain_: list[dec.Decision], focus: str) -> list[str]:
+    """'Replaces' / 'Replaced by' lines with the dates each was in force; empty for a decision never replaced."""
+    if len(chain_) < 2:
+        return []
+    lines = ["  Lineage, oldest first:"]
+    for d in chain_:
+        until = f" until {d.valid_to[:10]}" if d.valid_to else " (in force)" if d.status == "accepted" else f" ({d.status})"
+        marker = "→ " if d.id == focus else "  "
+        lines.append(f"  {marker}{d.id}  {d.title}: from {d.valid_from[:10]}{until}")
+    return lines
+
+
 def chain(tree: dict) -> str:
     lines = [f"{tree['id']}  {tree['title']}" + ("" if tree["status"] == "accepted" else f"  ({tree['status']})")]
 
