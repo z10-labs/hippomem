@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import socket
 import sqlite3
@@ -18,6 +19,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -130,13 +132,13 @@ class Sandbox:
 
     def save(self) -> None:
         """Write what's needed to reopen this sandbox in another process."""
-        state = {"engineers": [e.__dict__ for e in self.engineers.values()], "tokens": self.tokens, "now": self.now}
+        state = {"engineers": [e.__dict__ for e in self.engineers.values()], "tokens": self.tokens, "now": self.now, "port": self.port}
         (self.root / "sandbox.json").write_text(json.dumps(state, indent=2))
 
     @classmethod
     def load(cls, root: Path, book: ledger.Ledger, phase: str = "", experiment: str = "") -> Sandbox:
         state = json.loads((root / "sandbox.json").read_text())
-        box = cls(root=root, book=book, phase=phase, experiment=experiment)
+        box = cls(root=root, book=book, phase=phase, experiment=experiment, port=state["port"])
         box.engineers = {e["id"]: Engineer(**e) for e in state["engineers"]}
         box.tokens = state["tokens"]
         box.set_time(state["now"])
@@ -203,6 +205,8 @@ class Sandbox:
         shutil.copytree(self.root, root, ignore=shutil.ignore_patterns("agent-config", "transcripts", "events.jsonl", "runs.jsonl", "server.log"))
         copy = Sandbox(root=root, book=self.book, phase=phase or self.phase, experiment=experiment or self.experiment)
         copy.engineers, copy.tokens = dict(self.engineers), dict(self.tokens)
+        config = copy.home / "hippomem.toml"
+        config.write_text(re.sub(r"(?m)^port = \d+$", f"port = {copy.port}", config.read_text(), count=1))
         copy.set_time(self.now)
         copy.save()
         claude_shim.write_launcher(root / "bin")
@@ -280,6 +284,9 @@ class Sandbox:
         """Run one headless Claude Code session as `engineer` in `cwd` and record its cost."""
         self.book.check(RUN_BUDGET_USD, allow_past_ask=False)
         run_id = f"{self.experiment or 'x'}-{len(self.runs) + 1:03d}" + (f"-{label}" if label else "")
+        # Claude Code tells agents the real date; in a simulation that's wrong, and agents write it into records.
+        day = datetime.strptime(self.now[:10], "%Y-%m-%d").strftime("%A %-d %B %Y")
+        prompt = f"{prompt}\n\n(Today is {day}.)"
         run = AgentRun(run_id=run_id, engineer=engineer, repo=cwd.name, prompt=prompt, with_memory=with_memory)
         config_dir = self.agent_config(engineer, cwd.name if (self.root / "repos" / cwd.name).exists() else "_workspace")
         tools = ",".join(t for t, on in ((CODE_TOOLS, with_code), (MEMORY_TOOLS, with_memory)) if on) or "Read"

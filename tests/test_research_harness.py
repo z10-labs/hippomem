@@ -123,3 +123,17 @@ def test_probe_and_cold_read_summaries():
     records = [{"arm": "memory", "grades": {"Q01": {"points": [True, False], "wrong": []}, "Q02": {"points": [True], "wrong": [True]}}}]
     cold = metrics.coldread(records, queries)["memory"]
     assert cold["visible"] == "50%" and cold["held_out"] == "100%" and cold["wrong claims"] == 1
+
+
+def test_sandbox_state_survives_reloading(tmp_path):
+    from research.team import Engineer, Sandbox
+
+    book = ledger.Ledger(tmp_path / "ledger.csv")
+    box = Sandbox(root=tmp_path / "box", book=book, port=50123)
+    box.root.mkdir()
+    box.engineers = {"@jo": Engineer("@jo", "Jo", "jo@meridian.test")}
+    box.tokens = {"@jo": "hm_x"}
+    box.set_time("2026-02-11T16:00:00Z")
+    box.save()
+    again = Sandbox.load(box.root, book)
+    assert (again.port, again.now, again.tokens, again.engineers["@jo"].email) == (50123, "2026-02-11T16:00:00Z", {"@jo": "hm_x"}, "jo@meridian.test")
