@@ -9,6 +9,7 @@ files changed during the turn and the drafts recorded.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 import sqlite3
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
@@ -19,6 +20,9 @@ from hippomem.policy import Actor, Policy, refusal
 MAX_DIGEST_DECISIONS = 15
 MAX_OTHER_BRANCH_DRAFTS = 5
 MIN_COMMITS_TO_ASK_AUTHOR = 3
+# Code nobody has touched for this long is settled: its reasons have gone
+# quiet even if it took one commit (BD-47).
+SETTLED_AFTER_DAYS = 90
 
 # Files whose change usually means a decision was made: dependencies, schema,
 # infrastructure, service wiring.
@@ -213,8 +217,9 @@ def lookup(conn: sqlite3.Connection, policy: Policy, actor: Actor, session_id: s
     for d in decisions.all_current(conn, ("accepted",)):
         if any(a.repo == repo and systems.path_matches(path, a.path_glob) for a in d.anchors):
             anchored.append(d)
-        elif d.scope in ("system", "team") and (d.scope == "team" or set(d.systems) & set(path_systems)):
+        elif d.scope == "system" and set(d.systems) & set(path_systems):
             system_wide.append(d)
+        # Team-wide rules are in the session digest; repeating them before every edit is noise (BD-48).
 
     lines: list[str] = []
     if anchored:
@@ -223,7 +228,7 @@ def lookup(conn: sqlite3.Connection, policy: Policy, actor: Actor, session_id: s
             lines.append(render.decision_line(d))
             lines.extend(render.decision_body(d))
     if system_wide:
-        lines.append(f"Rules for {', '.join(path_systems) or 'the whole team'} that apply here:")
+        lines.append(f"Rules for {', '.join(path_systems)} that apply here:")
         lines.extend(render.decision_line(d) + f"  Why: {d.why}" for d in system_wide)
 
     urgent = urgent_proposals(conn, policy, actor, repo, path)
@@ -248,8 +253,19 @@ def lookup(conn: sqlite3.Connection, policy: Policy, actor: Actor, session_id: s
     return "\n".join(lines)
 
 
+def _settled(history: dict) -> bool:
+    last = str((history.get("last") or {}).get("date", ""))
+    try:
+        changed = datetime.strptime(last[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return False
+    return (db.parse_time(db.now()) - changed).days >= SETTLED_AFTER_DAYS
+
+
 def _should_suggest_asking(conn: sqlite3.Connection, actor: Actor, session_id: str, repo: str, path: str, history: dict) -> bool:
-    if int(history.get("commits", 0)) < MIN_COMMITS_TO_ASK_AUTHOR or not history.get("top_author_email"):
+    if not history.get("top_author_email"):
+        return False
+    if int(history.get("commits", 0)) < MIN_COMMITS_TO_ASK_AUTHOR and not _settled(history):
         return False
     if actors.by_email(conn, history["top_author_email"]) == actor.id:
         return False
