@@ -1,13 +1,6 @@
-# Hippocampus — Agent Instructions
+# Hippomem — Agent Instructions
 
-This is the Hippocampus MCP server. It provides decision memory tools to any project that
-configures it. Read this before modifying the server code.
-
-## What this project is
-
-Hippocampus is a stdio MCP server. It exposes five tools that any MCP-aware agent can call
-directly — no shell commands, no npm scripts. Decision records live in the consuming project's
-`.decisions/records/` directory.
+Hippomem is a team's engineering memory for AI coding agents. Read [docs/hippomem.md](docs/hippomem.md) before changing behaviour: it defines what the memory holds, the decision lifecycle and the plan. Decisions made while building it are in [docs/build-decisions.md](docs/build-decisions.md); add a row there for any new choice someone could reasonably have made differently.
 
 ## Development setup
 
@@ -18,53 +11,19 @@ pip install -e ".[dev]"
 pytest
 ```
 
-## Testing against another project
+Before every commit, run what CI runs:
 
-Add to the consuming project's `.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "hippocampus": {
-      "command": "hippocampus-mcp",
-      "args": ["--root", "."]
-    }
-  }
-}
+```bash
+ruff check . && ruff format --check . && mypy src/ && pytest
 ```
 
-`"."` resolves to the consuming project's root because the MCP host sets CWD there when
-spawning the stdio process.
+## Conventions
 
-To point at a working copy instead of the installed package, use
-`"command": "python", "args": ["/abs/path/to/src/hippocampus/server.py", "--root", "."]`.
-
-After editing server code, start a new Claude Code session (or `/mcp` to reconnect) —
-the server is spawned fresh each session.
-
-## Tools exposed
-
-| Tool | When to use |
-|---|---|
-| `hippocampus_query` | Before any non-trivial decision |
-| `hippocampus_log` | At each decision fork (two-phase: suggest then confirm) |
-| `hippocampus_classify` | When unsure if something is worth recording |
-| `hippocampus_list` | To browse all records by category or weight |
-| `hippocampus_chain` | To trace the full dependency chain of a DR |
-
-## Index location
-
-The vector index lives at `.hippocampus/index.json` in the consuming project root (gitignored).
-It is rebuilt automatically after each `hippocampus_log` call. To force a full rebuild, call
-`build_index(root, force=True)` directly or delete `.hippocampus/index.json`.
+- Python 3.11+, `from __future__ import annotations`, dataclasses (frozen where possible), module-level functions. No ORM, no DI framework.
+- SQLite through stdlib `sqlite3`. Schema changes go in `src/hippomem/db.py` as a new numbered migration; never edit a shipped one.
+- Call the embedding model only through `hippomem.embedding` (`embedding.embed(...)`, not `from hippomem.embedding import embed`). Tests patch that one module; a `from` import would silently bypass the stub and load the real model.
+- Anything that calls a model to judge drafts goes through `hippomem.judge`, so tests can replace it.
 
 ## Tests
 
-`pytest` — 92% coverage. The embedding model is stubbed in `tests/conftest.py` so the suite
-runs offline and fast; the retrieval behaviour under test is the graph expansion, not the model.
-
-## Constraints
-
-- No external services — works fully offline after first model download (~30MB)
-- No API key required
-- `--root` argument is mandatory for cross-repo use; defaults to CWD
+`pytest`. The embedding model and the judge are stubbed in `tests/conftest.py`, so the suite runs offline and fast. End-to-end scenarios with real headless agents live in `scenarios/` and are run separately; see that folder's README.
