@@ -1,0 +1,263 @@
+# The query set for E3, E7 and E9 (docs/research-plan.md). Written
+# 2026-11-05, before any run. Questions marked held_out are never looked at
+# while fixing the product; they only confirm that a fix generalises.
+#
+# Each answer is graded against `must` (points a correct answer contains) and
+# `must_not` (claims that would be wrong, usually a stale fact stated as
+# current). `as_of` questions ask about a past date; the right answer is
+# what was in force then.
+#
+# kind: why | rejected | current | as_of | depends | stale | explored | legacy
+
+[[queries]]
+id = "Q01"
+kind = "why"
+question = "Why does ledger-api store money as integers?"
+truth = ["M01"]
+must = ["integer minor units (cents)", "floats round wrongly", "allows arithmetic and comparison in SQL"]
+must_not = []
+
+[[queries]]
+id = "Q02"
+kind = "rejected"
+question = "What representations of money did the team reject, and why?"
+truth = ["M01"]
+must = ["floats: rounding errors", "decimal strings: no arithmetic or sorting in SQL"]
+must_not = []
+
+[[queries]]
+id = "Q03"
+kind = "current"
+held_out = true
+question = "How is API rate limiting done at Meridian today?"
+truth = ["M15"]
+must = ["in the API gateway (Envoy) for all services", "services don't keep their own counters"]
+must_not = ["ledger-api keeps fixed-window counters in Postgres (as current)"]
+
+[[queries]]
+id = "Q04"
+kind = "as_of"
+as_of = "2026-02-06"
+question = "As of 6 February 2026, how did ledger-api rate limit requests?"
+truth = ["M07"]
+must = ["fixed-window counters in Postgres", "per customer"]
+must_not = ["in the API gateway"]
+
+[[queries]]
+id = "Q05"
+kind = "why"
+question = "Why did rate limiting move out of ledger-api?"
+truth = ["M15", "M07"]
+must = ["one place with consistent limits for all services", "replaced ledger-api's Postgres counters"]
+must_not = []
+
+[[queries]]
+id = "Q06"
+kind = "current"
+held_out = true
+question = "Can a service add Redis today? Under what conditions?"
+truth = ["M21"]
+must = ["yes, as a cache only", "run by platform", "Postgres stays the primary datastore"]
+must_not = ["no new datastores at all (as current)"]
+
+[[queries]]
+id = "Q07"
+kind = "as_of"
+as_of = "2026-01-30"
+question = "In late January 2026, could a service add Redis? Why or why not?"
+truth = ["M03"]
+must = ["no: Postgres was the only datastore", "platform was one person"]
+must_not = ["Redis allowed as a cache"]
+
+[[queries]]
+id = "Q08"
+kind = "stale"
+question = "Which decisions rested on the platform team being one person, and are they still in force?"
+truth = ["M03", "M21", "X02", "M13"]
+must = ["the Postgres-only rule rested on it", "it was superseded when platform grew to three (Redis as cache allowed)", "the NATS spike was dropped for that reason"]
+must_not = []
+
+[[queries]]
+id = "Q09"
+kind = "current"
+held_out = true
+question = "How does ledger-worker send payouts to Paystream today, and why?"
+truth = ["M19"]
+must = ["individually, up to 20 at a time", "Paystream raised the limit to 50 requests/second", "one bad bank account no longer fails a batch"]
+must_not = ["batches of 100 through the bulk API (as current)"]
+
+[[queries]]
+id = "Q10"
+kind = "why"
+question = "What happened with duplicate payouts, and what changed because of it?"
+truth = ["M16"]
+must = ["worker restarted mid-batch on 2026-02-11 and paid recipients twice", "each payout request carries an idempotency key from batch date and recipient id"]
+must_not = []
+
+[[queries]]
+id = "Q11"
+kind = "explored"
+question = "Has anyone tried running payout batches from a separate cron container?"
+truth = ["X01", "M08"]
+must = ["yes, a spike", "it missed runs silently after restarts", "revisit if platform offers monitored scheduled jobs"]
+must_not = []
+
+[[queries]]
+id = "Q12"
+kind = "rejected"
+held_out = true
+question = "Why doesn't billing use Kafka or NATS for its events?"
+truth = ["M13", "X02", "M03"]
+must = ["events go through a Postgres outbox polled by ledger-worker", "a new stateful service was too much for a one-person platform", "NATS was spiked and dropped"]
+must_not = []
+
+[[queries]]
+id = "Q13"
+kind = "current"
+question = "How should storefront get data from the ledger?"
+truth = ["M02", "M05"]
+must = ["through ledger-api's API, never its database", "using the client generated from the OpenAPI spec"]
+must_not = []
+
+[[queries]]
+id = "Q14"
+kind = "why"
+question = "Why are refunds recorded as new negative entries instead of edits?"
+truth = ["M11"]
+must = ["entries are never updated or deleted", "auditors need the full history"]
+must_not = []
+
+[[queries]]
+id = "Q15"
+kind = "why"
+held_out = true
+question = "How are account balances computed, and what was rejected?"
+truth = ["M22"]
+must = ["sum of entries plus a daily snapshot table", "running balance column rejected: row-lock contention"]
+must_not = []
+
+[[queries]]
+id = "Q16"
+kind = "rejected"
+question = "Why isn't an invoice's due date stored?"
+truth = ["M23"]
+must = ["computed from payment terms when read", "a stored date goes stale when terms are corrected"]
+must_not = []
+
+[[queries]]
+id = "Q17"
+kind = "current"
+held_out = true
+question = "Which exchange rates does billing use to convert currencies today, and since when?"
+truth = ["M26", "M18"]
+must = ["Paystream's settlement rate", "since mid-March 2026 (week 12), replacing ECB rates", "ECB caused reconciliation mismatches"]
+must_not = ["ECB daily rates (as current)"]
+
+[[queries]]
+id = "Q18"
+kind = "as_of"
+as_of = "2026-03-06"
+question = "As of 6 March 2026, where did billing's exchange rates come from?"
+truth = ["M18"]
+must = ["daily ECB reference rates cached in Postgres"]
+must_not = ["Paystream's settlement rate"]
+
+[[queries]]
+id = "Q19"
+kind = "rejected"
+question = "Why does ui-kit use CSS modules? What else was tried or considered?"
+truth = ["M06"]
+must = ["no runtime cost, works with server rendering", "styled-components was tried first and broke streaming SSR", "Tailwind rejected: forces config on consuming apps"]
+must_not = []
+
+[[queries]]
+id = "Q20"
+kind = "legacy"
+question = "Why does payout rounding use round-half-even?"
+truth = ["L1"]
+must = ["Paystream sums with banker's rounding", "half-up caused 1-cent reconciliation mismatches"]
+must_not = []
+
+[[queries]]
+id = "Q21"
+kind = "legacy"
+held_out = true
+question = "Why is storefront's session cookie SameSite=None?"
+truth = ["L2"]
+must = ["checkout is embedded in partner sites through an iframe"]
+must_not = []
+
+[[queries]]
+id = "Q22"
+kind = "current"
+question = "How does Meridian do feature flags?"
+truth = ["M20"]
+must = ["a flags table in each service's own Postgres", "hosted flag services rejected: cost and vendor holding prod config"]
+must_not = []
+
+[[queries]]
+id = "Q23"
+kind = "depends"
+question = "What depends on the decision to store money as integer minor units?"
+truth = ["M01", "M14"]
+must = ["ui-kit's Money component formats integer minor units"]
+must_not = []
+
+[[queries]]
+id = "Q24"
+kind = "depends"
+held_out = true
+question = "If billing dropped its Postgres outbox, what decisions or past findings would that run into?"
+truth = ["M13", "X02", "M21"]
+must = ["refund events are published through the outbox", "NATS was spiked and dropped", "Redis is a cache only; no new message broker has been approved"]
+must_not = []
+
+[[queries]]
+id = "Q25"
+kind = "stale"
+question = "Which decisions are no longer in force, and what replaced them?"
+truth = ["M03", "M07", "M09", "M18"]
+must = ["Postgres-only rule → Redis allowed as cache", "ledger-api Postgres rate limit counters → gateway", "payout batches of 100 → individual, 20 at a time", "ECB rates → Paystream settlement rate"]
+must_not = []
+
+[[queries]]
+id = "Q26"
+kind = "current"
+question = "What happens when a payout fails?"
+truth = ["M25"]
+must = ["retried three times with backoff (1, 5, 25 minutes)", "then a manual review queue"]
+must_not = []
+
+[[queries]]
+id = "Q27"
+kind = "explored"
+held_out = true
+question = "Can storefront run on an edge runtime?"
+truth = ["X03"]
+must = ["tried and dropped", "the API client and signing library need Node APIs", "revisit when the edge runtime supports node:crypto"]
+must_not = []
+
+[[queries]]
+id = "Q28"
+kind = "current"
+question = "What is the logging standard across services?"
+truth = ["M12"]
+must = ["structured JSON", "request id in X-Request-Id"]
+must_not = []
+
+[[queries]]
+id = "Q29"
+kind = "depends"
+held_out = true
+question = "What does checkout do when a customer submits payment twice, and what makes that possible?"
+truth = ["M24", "M04"]
+must = ["shows an 'already processed' receipt on 409", "ledger-api's idempotency keys on money-moving POSTs"]
+must_not = []
+
+[[queries]]
+id = "Q30"
+kind = "why"
+question = "Who decided that payouts are sent individually, and when?"
+truth = ["M19"]
+must = ["Jo", "week 8 (late February 2026)"]
+must_not = []

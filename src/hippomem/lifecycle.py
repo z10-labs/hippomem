@@ -9,7 +9,7 @@ Commits straight onto a default branch are reconciled commit by commit.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from hippomem import db, drafts, reconcile
 from hippomem.policy import Policy
@@ -86,8 +86,8 @@ def sort_again(conn: sqlite3.Connection, branch_id: int) -> dict:
 
 def close_stale(conn: sqlite3.Connection, days: int, now: datetime | None = None) -> list[str]:
     """Close active, non-default branches with no activity for `days` days."""
-    current = now or datetime.now(timezone.utc)
-    cutoff = (current - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    current = now or db.parse_time(db.now())
+    cutoff = (current - timedelta(days=days)).strftime(db.TIME_FORMAT)
     rows = conn.execute("SELECT id, repo, name FROM branch WHERE state = 'active' AND last_activity_at < ?", (cutoff,)).fetchall()
     closed = []
     for branch_id, repo, name in rows:
