@@ -1,0 +1,861 @@
+# Meridian: the answer key for the research (docs/research-plan.md, T1).
+#
+# Written 2026-11-05, before any run. Agents never see this file. Simulated
+# engineers see only their step's prompts. Change it only with a dated note in
+# docs/research/log.md, never after looking at a run's results.
+#
+# Oracle ids (M01, X01, L1) are this file's own; the memory issues its own
+# ids (D-0001, X-0001). Matching between them is the grader's job.
+#
+# Week n starts on Monday 2026-01-05 + 7(n-1). `day` is 1 (Mon) to 5 (Fri).
+
+[world]
+start = "2026-01-05"
+weeks = 12
+
+# --- engineers --------------------------------------------------------------
+
+[[engineers]]
+id = "@priya"
+name = "Priya Naidoo"
+email = "priya@meridian.test"
+kind = "admin"
+owns = ["platform"]
+
+[[engineers]]
+id = "@alex"
+name = "Alex Mokoena"
+email = "alex@meridian.test"
+kind = "engineer"
+owns = ["billing"]
+
+[[engineers]]
+id = "@jo"
+name = "Jo Dlamini"
+email = "jo@meridian.test"
+kind = "engineer"
+owns = ["payouts"]
+
+[[engineers]]
+id = "@sam"
+name = "Sam Khumalo"
+email = "sam@meridian.test"
+kind = "engineer"
+owns = ["storefront", "ui-kit"]
+
+# --- decisions: what the team actually decided ----------------------------
+
+[[decisions]]
+id = "M01"
+week = 1
+title = "Money is stored as integer minor units with an ISO currency code"
+why = "Floats round wrongly (0.1 + 0.2); integer cents add and compare exactly, in Python and in SQL"
+rejected = [
+  { option = "floats", reason = "rounding errors on money" },
+  { option = "decimal amounts stored as strings", reason = "no arithmetic or sorting in SQL" },
+]
+scope = "code"
+systems = ["billing"]
+weight = "standard"
+made_by = "@alex"
+step = "w1-money"
+
+[[decisions]]
+id = "M02"
+week = 1
+title = "Services never read another service's database; they call its API"
+why = "Reading another service's tables couples everyone to its schema, so it can never change safely"
+rejected = [{ option = "a shared read replica every service can query", reason = "couples schemas across teams" }]
+scope = "team"
+systems = []
+weight = "heavy"
+made_by = "@priya"
+step = "w1-team-rules"
+
+[[decisions]]
+id = "M03"
+week = 1
+title = "Postgres 16 is the only datastore; no new datastore without a platform decision"
+why = "Platform is one person; every extra stateful service is more to run, back up and be paged for"
+rejected = [
+  { option = "Redis", reason = "another stateful service to operate" },
+  { option = "MongoDB", reason = "another stateful service; nothing needs documents" },
+]
+constraints = [{ text = "The platform team is one person (Priya)", kind = "org", revisit_if = "the platform team has three or more people" }]
+scope = "team"
+systems = []
+weight = "heavy"
+made_by = "@priya"
+step = "w1-team-rules"
+superseded_by = "M21"
+
+[[decisions]]
+id = "M04"
+week = 2
+title = "Every money-moving POST takes an idempotency key, kept for 24 hours in Postgres"
+why = "Clients and the card processor retry; without a key a retry moves money twice"
+rejected = [{ option = "client-side de-duplication only", reason = "server retries and webhooks bypass the client" }]
+constraints = [{ text = "The card processor retries webhooks for up to 24 hours", kind = "external", revisit_if = "the processor's retry window changes" }]
+scope = "system"
+systems = ["billing"]
+weight = "standard"
+made_by = "@alex"
+step = "w2-idempotency"
+
+[[decisions]]
+id = "M05"
+week = 2
+title = "Storefront calls ledger-api through a client generated from its OpenAPI spec"
+why = "Hand-written calls drift from the API; a generated client breaks the build when the API changes"
+rejected = [{ option = "hand-written fetch calls", reason = "drift silently from the API" }]
+scope = "code"
+systems = ["storefront"]
+weight = "standard"
+made_by = "@sam"
+step = "w2-api-client"
+depends_on = ["M02"]
+
+[[decisions]]
+id = "M06"
+week = 2
+title = "ui-kit components are styled with CSS modules"
+why = "No runtime styling cost and works with server rendering; consuming apps need no extra config"
+rejected = [
+  { option = "styled-components", reason = "tried first; breaks streaming server rendering and adds runtime cost" },
+  { option = "Tailwind", reason = "forces its config and build step on every consuming app" },
+]
+scope = "code"
+systems = ["ui-kit"]
+weight = "standard"
+made_by = "@sam"
+step = "w2-ui-styling"
+reversal = "within-branch"
+
+[[decisions]]
+id = "M07"
+week = 3
+title = "ledger-api rate limits POST endpoints with fixed-window counters in Postgres"
+why = "Needed per-customer limits now, and M03 rules out Redis"
+rejected = [{ option = "Redis counters", reason = "no new datastores (M03)" }]
+scope = "code"
+systems = ["billing"]
+weight = "standard"
+made_by = "@alex"
+step = "w3-rate-limit"
+depends_on = ["M03"]
+superseded_by = "M15"
+
+[[decisions]]
+id = "M08"
+week = 3
+title = "Payout batches run daily at 02:00 UTC from ledger-worker's in-process scheduler, with a run log table"
+why = "A missed run shows up in the run log and the worker's alerts; the cron-container spike missed runs silently"
+rejected = [{ option = "a separate cron container", reason = "missed runs silently after restarts (X01)" }]
+scope = "code"
+systems = ["payouts"]
+weight = "standard"
+made_by = "@jo"
+step = "w3-payout-schedule"
+informed_by = ["X01"]
+
+[[decisions]]
+id = "M09"
+week = 4
+title = "Payouts are sent in batches of 100 through Paystream's bulk API"
+why = "Paystream allows 5 requests per second per account; individual calls would take hours"
+rejected = [{ option = "one API call per payout", reason = "too slow under the 5 requests/second limit" }]
+constraints = [{ text = "Paystream allows 5 requests per second per account", kind = "external", revisit_if = "Paystream raises our limit" }]
+scope = "code"
+systems = ["payouts"]
+weight = "standard"
+made_by = "@jo"
+step = "w4-payout-batches"
+superseded_by = "M19"
+
+[[decisions]]
+id = "M10"
+week = 4
+title = "The checkout page is rendered on the server"
+why = "The payment page must work without client JavaScript and keep a strict content security policy"
+rejected = [{ option = "a client-rendered single-page checkout", reason = "needs client JS and a looser CSP on the payment page" }]
+scope = "code"
+systems = ["storefront"]
+weight = "standard"
+made_by = "@sam"
+step = "w4-checkout-ssr"
+
+[[decisions]]
+id = "M11"
+week = 4
+title = "Refunds are new negative ledger entries; ledger entries are never updated or deleted"
+why = "Auditors need the full history; an edited entry hides what happened"
+rejected = [{ option = "editing the original entry's amount", reason = "destroys the audit trail" }]
+scope = "system"
+systems = ["billing"]
+weight = "heavy"
+made_by = "@alex"
+step = "w4-refunds"
+
+[[decisions]]
+id = "M12"
+week = 5
+title = "All services log structured JSON with a request id passed in X-Request-Id"
+why = "One request can be followed across services; plain text logs can't be queried"
+rejected = [{ option = "plain text logs", reason = "can't be searched or joined across services" }]
+scope = "team"
+systems = []
+weight = "standard"
+made_by = "@priya"
+step = "w5-logging"
+
+[[decisions]]
+id = "M13"
+week = 5
+title = "Refund events are published through a Postgres outbox table that ledger-worker polls"
+why = "Reliable publishing in the same transaction as the refund, with no new infrastructure (M03)"
+rejected = [
+  { option = "Kafka", reason = "a new stateful service the one-person platform can't run (M03)" },
+  { option = "NATS", reason = "spiked and dropped for the same reason (X02)" },
+]
+scope = "code"
+systems = ["billing"]
+weight = "standard"
+made_by = "@alex"
+step = "w5-refund-events"
+depends_on = ["M03"]
+informed_by = ["X02"]
+
+[[decisions]]
+id = "M14"
+week = 5
+title = "Prices are formatted by ui-kit's Money component from integer minor units with Intl.NumberFormat"
+why = "One formatter for every page, fed the same integers the ledger stores (M01)"
+rejected = [{ option = "formatting floats in each page", reason = "inconsistent and wrong for some currencies" }]
+scope = "code"
+systems = ["storefront", "ui-kit"]
+weight = "standard"
+made_by = "@sam"
+step = "w5-money-format"
+depends_on = ["M01"]
+
+[[decisions]]
+id = "M15"
+week = 6
+title = "Rate limiting happens in the API gateway for all services"
+why = "One place with consistent limits; services stop carrying their own counters"
+rejected = [{ option = "per-service counters (M07)", reason = "every service reimplements it differently" }]
+scope = "team"
+systems = ["platform"]
+weight = "heavy"
+made_by = "@priya"
+step = "w6-gateway-limits"
+supersedes = ["M07"]
+
+[[decisions]]
+id = "M16"
+week = 6
+title = "Each payout request carries an idempotency key built from the batch date and recipient id"
+why = "Incident on 2026-02-11: the worker restarted mid-batch and paid 43 recipients twice; Paystream de-duplicates on the key"
+rejected = [{ option = "tracking sent payouts only in our own table", reason = "the restart happened between Paystream's reply and our write" }]
+scope = "code"
+systems = ["payouts"]
+weight = "heavy"
+made_by = "@jo"
+step = "w6-payout-incident"
+
+[[decisions]]
+id = "M17"
+week = 7
+title = "ui-kit is published as a versioned npm package and storefront pins a minor version"
+why = "Storefront upgrades on purpose; a breaking ui-kit change can't land in checkout unannounced"
+rejected = [{ option = "linking ui-kit from a git submodule", reason = "every ui-kit commit lands in storefront at once" }]
+scope = "code"
+systems = ["ui-kit", "storefront"]
+weight = "standard"
+made_by = "@sam"
+step = "w7-ui-kit-release"
+
+[[decisions]]
+id = "M18"
+week = 7
+title = "Currency conversion uses daily ECB reference rates cached in Postgres"
+why = "Free, stable for a day, no per-request call to an FX provider"
+rejected = [{ option = "a live FX API call per request", reason = "cost, latency and the provider's rate limits" }]
+constraints = [{ text = "We only settle EUR, USD and GBP", kind = "external", revisit_if = "a customer needs another currency" }]
+scope = "code"
+systems = ["billing"]
+weight = "standard"
+made_by = "@alex"
+step = "w7-fx"
+superseded_by = "M26"
+
+[[decisions]]
+id = "M19"
+week = 8
+title = "Payouts are sent individually, up to 20 at a time"
+why = "Paystream raised our limit to 50 requests per second, so the bulk API's reason is gone; individual calls mean one bad bank account no longer fails a batch of 100"
+rejected = [{ option = "batches of 100 through the bulk API (M09)", reason = "one bad record fails the whole batch" }]
+scope = "code"
+systems = ["payouts"]
+weight = "heavy"
+made_by = "@jo"
+step = "w8-payout-concurrency"
+supersedes = ["M09"]
+
+[[decisions]]
+id = "M20"
+week = 8
+title = "Feature flags live in a flags table in each service's own Postgres"
+why = "No vendor holds production configuration and nothing new to pay for or run"
+rejected = [{ option = "a hosted feature-flag service", reason = "cost and a vendor holding production config" }]
+scope = "team"
+systems = []
+weight = "standard"
+made_by = "@priya"
+step = "w8-flags"
+
+[[decisions]]
+id = "M21"
+week = 9
+title = "Postgres stays the primary datastore; Redis is allowed as a cache only, run by platform"
+why = "The platform team is now three people, so M03's constraint no longer holds, and FX and catalog lookups need a cache"
+rejected = [{ option = "keeping Postgres as the only datastore", reason = "its reason (a one-person platform) no longer holds" }]
+scope = "team"
+systems = []
+weight = "heavy"
+made_by = "@priya"
+step = "w9-redis-cache"
+supersedes = ["M03"]
+
+[[decisions]]
+id = "M22"
+week = 9
+title = "Account balances are the sum of ledger entries plus a daily snapshot table"
+why = "A running balance column causes row-lock contention on busy accounts"
+rejected = [{ option = "a running balance column updated on every entry", reason = "row-lock contention on hot accounts" }]
+scope = "code"
+systems = ["billing"]
+weight = "standard"
+made_by = "@alex"
+step = "w9-balances"
+depends_on = ["M11"]
+
+[[decisions]]
+id = "M23"
+week = 10
+title = "An invoice's due date is computed from its payment terms when read, not stored"
+why = "A stored due date goes stale when payment terms are corrected"
+rejected = [{ option = "storing the due date on the invoice", reason = "goes stale when terms are corrected" }]
+scope = "code"
+systems = ["billing"]
+weight = "standard"
+made_by = "@alex"
+step = "w10-due-dates"
+reversal = "across-sessions"
+
+[[decisions]]
+id = "M24"
+week = 10
+title = "Checkout shows an 'already processed' receipt when the ledger answers 409 to a repeated idempotency key"
+why = "A double-click or retry should show the customer their receipt, not an error"
+rejected = [{ option = "showing a generic error on 409", reason = "customers retry again and contact support" }]
+scope = "code"
+systems = ["storefront"]
+weight = "standard"
+made_by = "@sam"
+step = "w10-checkout-409"
+depends_on = ["M04"]
+
+[[decisions]]
+id = "M25"
+week = 11
+title = "Failed payouts are retried three times with backoff (1, 5, 25 minutes), then go to a manual review queue"
+why = "Most failures are transient; repeated failures usually mean bad bank details a person must fix"
+rejected = [{ option = "retrying until it succeeds", reason = "hides bad bank details and keeps hammering Paystream" }]
+scope = "code"
+systems = ["payouts"]
+weight = "standard"
+made_by = "@jo"
+step = "w11-payout-retries"
+depends_on = ["M16"]
+
+[[decisions]]
+id = "M26"
+week = 12
+title = "Currency conversion uses Paystream's settlement rate, not ECB rates"
+why = "The new enterprise contract settles at Paystream's rate; ECB rates caused reconciliation mismatches"
+rejected = [{ option = "ECB daily reference rates (M18)", reason = "don't match what Paystream actually settles" }]
+scope = "code"
+systems = ["billing"]
+weight = "heavy"
+made_by = "@alex"
+step = "w12-fx-provider"
+supersedes = ["M18"]
+
+# --- explored: tried and dropped ------------------------------------------
+
+[[explored]]
+id = "X01"
+week = 3
+title = "A separate cron container for payout batches"
+tried = "Running payout batches from a cron container next to the worker"
+outcome = "abandoned"
+why = "The container missed runs silently whenever it restarted; nothing noticed"
+revisit_if = "platform offers scheduled jobs with monitoring"
+step = "w3-cron-spike"
+
+[[explored]]
+id = "X02"
+week = 5
+title = "NATS for refund events"
+tried = "Publishing refund events through NATS"
+outcome = "abandoned"
+why = "Another stateful service for a one-person platform (M03)"
+revisit_if = "the platform team grows, or event volume outgrows a Postgres outbox"
+step = "w5-nats-spike"
+
+[[explored]]
+id = "X03"
+week = 11
+title = "Running storefront on an edge runtime"
+tried = "Deploying storefront to an edge runtime"
+outcome = "abandoned"
+why = "The generated API client and the signing library need Node APIs the edge runtime lacks"
+revisit_if = "the edge runtime supports node:crypto and Node streams"
+step = "w11-edge-spike"
+
+# --- legacy: reasons only the author knows (for "ask the author") ---------
+
+[[legacy]]
+id = "L1"
+repo = "ledger-worker"
+path = "src/payouts/rounding.py"
+author = "@jo"
+reason = "Paystream sums amounts with banker's rounding (half to even); rounding half up gave 1-cent reconciliation mismatches every month in 2025"
+
+[[legacy]]
+id = "L2"
+repo = "storefront"
+path = "src/lib/cookies.ts"
+author = "@sam"
+reason = "Checkout is embedded in partner sites through an iframe, so the session cookie must be SameSite=None and Secure or it is dropped"
+
+# --- steps: the work, in order --------------------------------------------
+#
+# Each session's prompt is what the engineer types to their agent that day.
+# The harness adds the same closing line to every coding session: commit when
+# done. `end`: merge (into main, as a reviewed PR), close (abandoned branch),
+# or none. `expects`: oracle records this step should produce.
+# `memory_driven`: the prompt leaves the choice open and only earlier records
+# in the memory point to the team's answer; scored separately.
+
+[[steps]]
+id = "w1-money"
+week = 1
+day = 1
+engineer = "@alex"
+repo = "ledger-api"
+branch = "feat/money-type"
+end = "merge"
+expects = ["M01"]
+sessions = [
+  "Add a Money type in src/ledger_api/money.py and use it in the entries model. Store amounts as integer minor units (cents) plus an ISO currency code. Not floats, they round wrong, and not decimal strings either, we need to add and sort amounts in SQL. Add/compare only within one currency.",
+]
+
+[[steps]]
+id = "w1-team-rules"
+week = 1
+day = 3
+engineer = "@priya"
+repo = "infra"
+branch = ""
+end = "none"
+expects = ["M02", "M03"]
+sessions = [
+  "We agreed two team-wide rules in today's architecture meeting; please record them in the team memory, no code changes. One: services never read another service's database, they call its API. We talked about a shared read replica and said no, it couples everyone to each other's schemas. Two: Postgres 16 is our only datastore, and nobody adds a new one (Redis, Mongo, anything) without a platform decision. Reason: platform is just me, and every stateful service is more to run, back up and get paged for. We'll revisit when platform is three people or more.",
+]
+
+[[steps]]
+id = "w2-idempotency"
+week = 2
+day = 1
+engineer = "@alex"
+repo = "ledger-api"
+branch = "feat/idempotency-keys"
+end = "merge"
+expects = ["M04"]
+sessions = [
+  "Every POST that moves money needs an Idempotency-Key header. Store keys with the response in a Postgres table for 24 hours and replay the stored response on a repeat; a repeat with a different body gets 409. 24 hours because the card processor retries webhooks for up to a day. Client-side de-duplication alone isn't enough, server retries bypass it.",
+]
+
+[[steps]]
+id = "w2-api-client"
+week = 2
+day = 2
+engineer = "@sam"
+repo = "storefront"
+branch = "feat/ledger-client"
+end = "merge"
+expects = ["M05"]
+sessions = [
+  "Replace the hand-written fetch calls in src/lib/api.ts with a client generated from ledger-api's OpenAPI spec (vendor the spec into api/ledger.yaml and use openapi-typescript). Hand-written calls keep drifting from the API; with a generated client the build breaks when the API changes, which is what we want.",
+]
+
+[[steps]]
+id = "w2-ui-styling"
+week = 2
+day = 3
+engineer = "@sam"
+repo = "ui-kit"
+branch = "feat/styling"
+end = "merge"
+expects = ["M06"]
+sessions = [
+  "Give ui-kit a styling approach. Let's use styled-components, convert Button to it.",
+  "Change of plan on styling: styled-components breaks streaming server rendering in storefront and adds runtime cost. Switch Button to CSS modules instead and remove styled-components. Tailwind isn't an option either, it would force its config on every app that uses ui-kit.",
+]
+
+[[steps]]
+id = "w3-rate-limit"
+memory_driven = true  # the prompt doesn't say how; only the memory can
+week = 3
+day = 1
+engineer = "@alex"
+repo = "ledger-api"
+branch = "feat/rate-limits"
+end = "merge"
+expects = ["M07"]
+sessions = [
+  "Add per-customer rate limiting to the POST endpoints: 100 requests a minute per customer, 429 when exceeded.",
+]
+
+[[steps]]
+id = "w3-cron-spike"
+week = 3
+day = 2
+engineer = "@jo"
+repo = "ledger-worker"
+branch = "spike/cron-container"
+end = "close"
+expects = ["X01"]
+sessions = [
+  "Spike: run the payout batch from a separate cron container (add a Dockerfile.cron and a crontab that runs python -m ledger_worker.payout_batch at 02:00 UTC). Just a spike.",
+  "Dropping the cron container spike: in testing it missed runs silently whenever the container restarted, and nothing noticed. We'd only revisit if platform gave us scheduled jobs with monitoring. Note that down so nobody tries it again blindly; leave the branch as is.",
+]
+
+[[steps]]
+id = "w3-payout-schedule"
+week = 3
+day = 4
+engineer = "@jo"
+repo = "ledger-worker"
+branch = "feat/payout-schedule"
+end = "merge"
+expects = ["M08"]
+sessions = [
+  "Run the daily payout batch at 02:00 UTC from the worker's existing in-process scheduler (src/ledger_worker/scheduler.py), and record every run in a payout_runs table so a missed run is visible. Not a cron container; we tried that this week and it missed runs silently.",
+]
+
+[[steps]]
+id = "w4-payout-batches"
+week = 4
+day = 1
+engineer = "@jo"
+repo = "ledger-worker"
+branch = "feat/paystream-bulk"
+end = "merge"
+expects = ["M09"]
+sessions = [
+  "Send payouts to Paystream in batches of 100 using their bulk endpoint (POST /v2/payouts/bulk) in src/payouts/client.py. Paystream only allows us 5 requests a second, so one call per payout would take hours. If they ever raise our limit we can rethink.",
+]
+
+[[steps]]
+id = "w4-checkout-ssr"
+week = 4
+day = 2
+engineer = "@sam"
+repo = "storefront"
+branch = "feat/checkout-ssr"
+end = "merge"
+expects = ["M10"]
+sessions = [
+  "Make the checkout page server-rendered: render it in src/pages/checkout.tsx on the server and remove the client-side fetching. The payment page has to work without client JavaScript and we want a strict CSP there. A client-rendered SPA checkout is out for those reasons.",
+]
+
+[[steps]]
+id = "w4-refunds"
+week = 4
+day = 3
+engineer = "@alex"
+repo = "ledger-api"
+branch = "feat/refunds"
+end = "merge"
+expects = ["M11"]
+sessions = [
+  "Add refunds: POST /v1/refunds creates a new negative ledger entry linked to the original. Never update or delete an existing entry, auditors need the full history; editing the original amount is exactly what we must not do. This applies to the whole ledger, not just refunds.",
+]
+
+[[steps]]
+id = "w4-decoy-tidy"
+week = 4
+day = 5
+engineer = "@alex"
+repo = "ledger-api"
+branch = "chore/tidy"
+end = "merge"
+expects = []
+sessions = [
+  "Housekeeping: rename src/ledger_api/helpers.py to utils.py and update imports, and fix the docstring typos in that file.",
+]
+
+[[steps]]
+id = "w5-logging"
+week = 5
+day = 1
+engineer = "@priya"
+repo = "infra"
+branch = "feat/json-logging"
+end = "merge"
+expects = ["M12"]
+sessions = [
+  "Add a shared logging config in logging/structured.json and document it in README.md: every service logs structured JSON and passes a request id in the X-Request-Id header so one request can be followed across services. This is a team-wide standard; plain text logs can't be searched or joined.",
+]
+
+[[steps]]
+id = "w5-nats-spike"
+week = 5
+day = 2
+engineer = "@priya"
+repo = "infra"
+branch = "spike/nats"
+end = "close"
+expects = ["X02"]
+sessions = [
+  "Spike: add a NATS server to docker-compose.yml so billing could publish refund events on it.",
+  "Abandoning the NATS spike. It's one more stateful service and platform is still just me; that's the Postgres-only rule. Worth revisiting if the platform team grows or event volume outgrows an outbox table. Make sure that's recorded; leave the branch.",
+]
+
+[[steps]]
+id = "w5-refund-events"
+memory_driven = true  # the prompt doesn't say how; only the memory can
+week = 5
+day = 3
+engineer = "@alex"
+repo = "ledger-api"
+branch = "feat/refund-events"
+end = "merge"
+expects = ["M13"]
+sessions = [
+  "Other services need to hear about refunds. Publish a refund.created event reliably, in the same transaction as the refund.",
+]
+
+[[steps]]
+id = "w5-money-format"
+week = 5
+day = 4
+engineer = "@sam"
+repo = "ui-kit"
+branch = "feat/money-component"
+end = "merge"
+expects = ["M14"]
+sessions = [
+  "Add a Money component to ui-kit that takes integer minor units and a currency code (what the ledger stores) and formats with Intl.NumberFormat. Every storefront page should use it instead of formatting floats itself, which has been inconsistent and wrong for JPY.",
+]
+
+[[steps]]
+id = "w6-gateway-limits"
+week = 6
+day = 1
+engineer = "@priya"
+repo = "infra"
+branch = "feat/gateway-rate-limits"
+end = "merge"
+expects = ["M15"]
+sessions = [
+  "Move rate limiting into the API gateway for every service: add Envoy local rate limit config in gateway/envoy.yaml, 100 requests/minute per customer (keyed on the X-Customer-Id header). From now on services don't carry their own rate limit counters; one place, consistent limits. This replaces ledger-api's Postgres counters.",
+]
+
+[[steps]]
+id = "w6-remove-counters"
+week = 6
+day = 2
+engineer = "@alex"
+repo = "ledger-api"
+branch = "chore/remove-rate-limit-counters"
+end = "merge"
+expects = []
+sessions = [
+  "The gateway does rate limiting now (Priya's change). Remove our Postgres rate limit counters and the middleware.",
+]
+
+[[steps]]
+id = "w6-payout-incident"
+week = 6
+day = 3
+engineer = "@jo"
+repo = "ledger-worker"
+branch = "fix/duplicate-payouts"
+end = "merge"
+expects = ["M16"]
+sessions = [
+  "Incident yesterday (2026-02-11): the worker restarted in the middle of a payout batch and paid 43 recipients twice. Our sent-payouts table didn't help because the restart happened between Paystream's reply and our write. Fix: every payout request sends an Idempotency-Key built from the batch date and the recipient id; Paystream de-duplicates on it.",
+]
+
+[[steps]]
+id = "w7-ui-kit-release"
+week = 7
+day = 1
+engineer = "@sam"
+repo = "ui-kit"
+branch = "chore/publish"
+end = "merge"
+expects = ["M17"]
+sessions = [
+  "Set ui-kit up to publish as a versioned npm package (@meridian/ui-kit, semver, version 1.0.0, a CHANGELOG.md). Storefront will pin a minor version so it upgrades on purpose and a breaking change can't land in checkout unannounced. Linking it as a git submodule is what we're moving away from.",
+]
+
+[[steps]]
+id = "w7-fx"
+week = 7
+day = 3
+engineer = "@alex"
+repo = "ledger-api"
+branch = "feat/fx-rates"
+end = "merge"
+expects = ["M18"]
+sessions = [
+  "Add currency conversion for invoice totals. Fetch the ECB daily reference rates once a day and cache them in an fx_rates table in Postgres. Don't call an FX API per request: cost, latency, and their rate limits. We only settle EUR, USD and GBP, so that's all we need for now.",
+]
+
+[[steps]]
+id = "w8-payout-concurrency"
+week = 8
+day = 1
+engineer = "@jo"
+repo = "ledger-worker"
+branch = "feat/individual-payouts"
+end = "merge"
+expects = ["M19"]
+sessions = [
+  "Good news: Paystream raised our limit to 50 requests a second. Switch from the bulk endpoint to sending payouts individually, up to 20 at a time. With the bulk API one bad bank account fails the whole batch of 100; individually, only that payout fails.",
+]
+
+[[steps]]
+id = "w8-flags"
+week = 8
+day = 3
+engineer = "@priya"
+repo = "infra"
+branch = ""
+end = "none"
+expects = ["M20"]
+sessions = [
+  "Record a team decision from today's meeting, no code: feature flags live in a flags table in each service's own Postgres. We looked at hosted flag services and said no: cost, and a vendor holding our production config.",
+]
+
+[[steps]]
+id = "w9-redis-cache"
+week = 9
+day = 1
+engineer = "@priya"
+repo = "infra"
+branch = "feat/redis-cache"
+end = "merge"
+expects = ["M21"]
+sessions = [
+  "Platform is three people now (welcome Thandi and Lee), so the Postgres-only rule's reason is gone. New rule: Postgres stays the primary datastore, and Redis is allowed as a cache only, run by platform. Add a redis service to docker-compose.yml marked cache-only (no persistence) and update the README's datastore section. FX and catalog lookups need the cache.",
+]
+
+[[steps]]
+id = "w9-balances"
+week = 9
+day = 2
+engineer = "@alex"
+repo = "ledger-api"
+branch = "feat/balances"
+end = "merge"
+expects = ["M22"]
+sessions = [
+  "Add GET /v1/accounts/{id}/balance. Compute it as the sum of ledger entries, plus a daily snapshot table so we don't sum the whole history. No running balance column updated on every entry: on busy accounts that's row-lock contention.",
+]
+
+[[steps]]
+id = "w10-due-dates"
+week = 10
+day = 1
+engineer = "@alex"
+repo = "ledger-api"
+branch = "feat/invoice-due-dates"
+end = "merge"
+expects = ["M23"]
+sessions = [
+  "Invoices need a due date. Add a due_date column to invoices and set it at creation from the payment terms (net 30 etc.).",
+  "Rethinking the due date: when finance corrects an invoice's payment terms, the stored due_date goes stale. Remove the column and compute the due date from the terms when the invoice is read.",
+  "Continue on invoice due dates: add the due date to the invoice API response and a test for terms corrections.",
+]
+
+[[steps]]
+id = "w10-checkout-409"
+week = 10
+day = 3
+engineer = "@sam"
+repo = "storefront"
+branch = "feat/checkout-409"
+end = "merge"
+expects = ["M24"]
+sessions = [
+  "When the ledger answers 409 to a repeated idempotency key at checkout (double click, retry), show an 'already processed' page with the receipt instead of an error. A generic error makes customers retry again and contact support.",
+]
+
+[[steps]]
+id = "w11-edge-spike"
+week = 11
+day = 1
+engineer = "@sam"
+repo = "storefront"
+branch = "spike/edge-runtime"
+end = "close"
+expects = ["X03"]
+sessions = [
+  "Spike: see if storefront can run on an edge runtime. Set export const runtime = 'edge' on the pages and see what breaks.",
+  "Dropping the edge spike: the generated API client and our signing library need Node APIs (node:crypto, Node streams) that the edge runtime doesn't have. Worth another look once the edge runtime supports those. Record it; leave the branch.",
+]
+
+[[steps]]
+id = "w11-payout-retries"
+week = 11
+day = 3
+engineer = "@jo"
+repo = "ledger-worker"
+branch = "feat/payout-retries"
+end = "merge"
+expects = ["M25"]
+sessions = [
+  "Failed payouts: retry three times with backoff, 1 minute, 5 minutes, 25 minutes, then put them in a manual review queue (payout_review table). Don't retry forever; repeated failures are usually bad bank details someone has to fix, and endless retries hammer Paystream.",
+]
+
+[[steps]]
+id = "w12-fx-provider"
+week = 12
+day = 1
+engineer = "@alex"
+repo = "ledger-api"
+branch = "feat/settlement-fx"
+end = "merge"
+expects = ["M26"]
+sessions = [
+  "The new enterprise contract settles at Paystream's rate, and the ECB rates have been causing reconciliation mismatches. Switch invoice currency conversion to the settlement rate Paystream returns with each payout and drop the ECB fetching.",
+]
+
+[[steps]]
+id = "w12-decoy-deps"
+week = 12
+day = 3
+engineer = "@jo"
+repo = "ledger-worker"
+branch = "chore/deps"
+end = "merge"
+expects = []
+sessions = [
+  "Bump httpx to the latest patch release in requirements.txt and fix the typo 'recipent' in src/payouts/client.py.",
+]

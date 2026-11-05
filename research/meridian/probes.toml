@@ -1,0 +1,143 @@
+# Probe tasks for E4 and E5 (docs/research-plan.md). Written 2026-11-05,
+# before any run.
+#
+# Each probe runs on a copy of the end-of-week-12 snapshot (repos and memory),
+# with and without Hippomem, at least 3 times each. The prompt nudges toward
+# what the team ruled out, or toward a fact that has gone stale.
+#
+# Scoring is by code, on the lines the run added (git diff against the
+# snapshot) in the probe's repo:
+#   violates: any added line matching one of these regexes (case-insensitive)
+#             means the run built what the team ruled out.
+#   conforms: if given, an added line matching one of these means the run
+#             built the team's way. If neither matches, the grader classifies
+#             the final message as asked / explained / other.
+# `truth` names the oracle records the right answer rests on. `stale` marks
+# probes where the nudge matches a record that was true once and is now
+# superseded; acting on it is a stale-fact failure (E2).
+
+[[probes]]
+id = "P01"
+repo = "ledger-api"
+engineer = "@alex"
+truth = ["M15"]
+stale = ["M07"]
+prompt = "Add rate limiting to the new POST /v1/payout-requests endpoint, 20 requests a minute per customer. Simplest is a counter table in Postgres, like the other endpoints have."
+violates = ['rate_limit', 'ratelimit', 'counter', '429']
+conforms = []
+
+[[probes]]
+id = "P02"
+repo = "ledger-worker"
+engineer = "@jo"
+truth = ["M19"]
+stale = ["M09"]
+prompt = "Payouts are slow. Group them into batches of 100 and send them through Paystream's bulk endpoint to stay inside their rate limit."
+violates = ['bulk', 'batch_size\s*=\s*100', 'chunk']
+conforms = []
+
+[[probes]]
+id = "P03"
+repo = "ledger-api"
+engineer = "@alex"
+truth = ["M11"]
+stale = []
+prompt = "Finance entered a refund with the wrong amount. Add an admin endpoint POST /v1/admin/entries/{id}/correct that fixes an existing ledger entry's amount."
+violates = ['update\s+\w*entr\w*\s+set', '\.amount\s*=', 'set\s+amount']
+conforms = ['revers', 'correcting entry', 'negative']
+
+[[probes]]
+id = "P04"
+repo = "storefront"
+engineer = "@sam"
+truth = ["M02", "M05"]
+stale = []
+prompt = "Show customers their total refunds on the account page. Quickest is to query the ledger's Postgres database directly from storefront."
+violates = ['\bpg\b', 'postgres', 'DATABASE_URL', 'new Pool', 'sql`']
+conforms = []
+
+[[probes]]
+id = "P05"
+repo = "ledger-api"
+engineer = "@alex"
+truth = ["M13", "X02"]
+stale = []
+prompt = "Publish chargeback events so other services can react to them. Kafka is the standard choice for this, add it."
+violates = ['kafka']
+conforms = ['outbox']
+
+[[probes]]
+id = "P06"
+repo = "ledger-worker"
+engineer = "@alex"
+truth = ["L1"]
+stale = []
+prompt = "Finance says payout amounts should round half up, that's what they expect. Change src/payouts/rounding.py to round half up."
+violates = ['ROUND_HALF_UP']
+conforms = []
+
+[[probes]]
+id = "P07"
+repo = "ledger-api"
+engineer = "@alex"
+truth = ["M23"]
+stale = []
+prompt = "Reports keep recomputing invoice due dates. Add a due_date column to invoices and fill it in when the invoice is created."
+violates = ['due_date\s+(date|timestamp)', 'add column due_date', 'due_date\s*=\s*Column', 'due_date\s+DATE']
+conforms = []
+
+[[probes]]
+id = "P08"
+repo = "ledger-api"
+engineer = "@alex"
+truth = ["M26"]
+stale = ["M18"]
+prompt = "Add a monthly statement that converts each invoice total to the customer's currency using the ECB daily rates."
+violates = ['ecb', 'europa\.eu', 'eurofxref']
+conforms = ['settlement']
+
+[[probes]]
+id = "P09"
+repo = "ui-kit"
+engineer = "@sam"
+truth = ["M06"]
+stale = []
+prompt = "Add a Badge component to ui-kit. Use Tailwind classes for it, it's faster to write."
+violates = ['tailwind', 'className="[^"]*\b(px|py|bg|text|rounded)-']
+conforms = ['module\.css']
+
+[[probes]]
+id = "P10"
+repo = "ledger-api"
+engineer = "@alex"
+truth = ["M21"]
+stale = ["M03"]
+prompt = "Settlement rate lookups are slow. Add a cache in front of them; use Redis if that's allowed here, otherwise whatever is."
+violates = []
+conforms = ['redis']
+
+# --- decoys: memory should not change anything -----------------------------
+# Scored on: did the run stay inside the task (files touched), turns, cost,
+# Hippomem tool calls, and whether the final message raises unrelated
+# decisions or asks needless questions (grader).
+
+[[decoys]]
+id = "Q01"
+repo = "storefront"
+engineer = "@sam"
+prompt = "Fix the typo 'Chekout' in the checkout page heading."
+allowed_files = ['src/pages/checkout.tsx']
+
+[[decoys]]
+id = "Q02"
+repo = "ledger-api"
+engineer = "@alex"
+prompt = "Add a unit test for adding two Money values in the same currency."
+allowed_files = ['tests/']
+
+[[decoys]]
+id = "Q03"
+repo = "ledger-worker"
+engineer = "@jo"
+prompt = "Rename the variable `tmp` in src/ledger_worker/jobs.py to something descriptive."
+allowed_files = ['src/ledger_worker/jobs.py']
