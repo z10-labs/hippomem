@@ -115,3 +115,15 @@ Full R1 summary and what R2 changes: [r1-baseline.md](r1-baseline.md). R1 spend 
 ## 2026-11-06: correction to the P06 finding
 
 The R1 entry said team-wide rules suppressed the ask-the-author hint. Wrong: the hint's condition ignores them. The real gate is `MIN_COMMITS_TO_ASK_AUTHOR = 3`, and `src/payouts/rounding.py` has one commit (Jo, 2025). Corrected in r1-baseline.md. The separate point stands: every before-edit lookup repeats the team-wide rules.
+
+## 2026-11-06: R2 so far, product fixes and harness changes
+
+**Product (BD-43 to BD-48):** drafts and the merge judge record supersessions (`replaces` / `repeats`); inferred proposals need a written reason, max 2 per merge; links join any records with provenance and versions get `valid_to` (migration 2, checked against a copy of R1's real memory); ask-the-author also fires for settled code (90 days untouched); team-wide rules only in the digest; `hippomem_get` shows a decision's lineage with dates. Deferred with reasons: versioned child tables, shared Constraint node (BD-46). 133 tests.
+
+**Harness, decided before R3 runs:**
+- The grader now separates claims that *contradict* the answer key from *extra* detail it doesn't cover, and ignores memory ids. R1's proposals were regraded with it (`review.regraded.jsonl`, $4.05): **0 claims in R1's proposals contradict the answer key.** The "75 invented claims" were extra detail. The three accepted proposals outside the key are true implementation details. The new grader agreed with the old on which record a proposal matches in 51 of 56 cases: a measure of grading noise.
+- When an agent stops to ask in a step that should produce code, the simulated engineer answers once, generically ("use your best judgement and go ahead"). Recall is reported with and without these rescued steps.
+- Decoys rewritten so they make sense whatever the timeline built (R1's first two had already been done).
+- M24 marked `excluded` in the answer key (inconsistent with M04, found by Watchman). R1 recall with it excluded: 22/25 (88%); heavy 6/8, standard 16/17.
+
+Spend: $56.12.

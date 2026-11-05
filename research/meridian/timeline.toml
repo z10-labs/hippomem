@@ -365,6 +365,10 @@ weight = "standard"
 made_by = "@sam"
 step = "w10-checkout-409"
 depends_on = ["M04"]
+# Added 2026-11-06 after R1: inconsistent with M04 (under M04 a 409 means the
+# key was reused with a different body, so it can't mean "already processed").
+# Watchman found it. Kept so steps still run; excluded from scoring.
+excluded = "inconsistent with M04 (found by the reviewer agent in R1)"
 
 [[decisions]]
 id = "M25"

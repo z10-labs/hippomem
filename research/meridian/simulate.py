@@ -24,6 +24,12 @@ from research.meridian import world
 from research.team import Engineer, Sandbox
 
 COMMIT_LINE = "\n\nWhen you're done, commit your work on the current branch with a clear message."
+# What the simulated engineer says when an agent stops to ask instead of doing
+# the work. Generic on purpose: it unblocks without leaking the answer key.
+ENGINEER_REPLY = (
+    "Earlier today you stopped to ask me before changing anything. I'm not around to answer: use your best judgement on"
+    " the open questions, make reasonable assumptions, note them in your summary, and go ahead with the task:\n\n"
+)
 REVIEWER = "watchman"
 REVIEWER_PROMPT = """You are Watchman, the team's reviewer agent for Hippomem, the team's engineering memory.
 
@@ -71,6 +77,12 @@ def run_step(box: Sandbox, step: dict, start: date, log: Path) -> None:
         text = prompt + (COMMIT_LINE if step["end"] != "none" else "")
         run = box.run_agent(engineer, box.repo(repo), text, label=f"{step['id']}-s{i + 1}")
         record["runs"].append({"run_id": run.run_id, "cost": run.cost_usd, "turns": run.turns, "error": run.error})
+        if step["end"] == "merge" and branch and box.git(repo, "rev-list", "--count", f"main..{branch}") == "0" and not box.has_changes(repo):
+            box.set_time(at(start, step["week"], step["day"], 10 + 2 * i))
+            reply = box.run_agent(engineer, box.repo(repo), ENGINEER_REPLY + text, label=f"{step['id']}-s{i + 1}-reply")
+            record["runs"].append({"run_id": reply.run_id, "cost": reply.cost_usd, "turns": reply.turns, "error": reply.error})
+            record["rescued"] = True
+            record["anomalies"].append(f"session {i + 1} stopped to ask without changing anything; the engineer told it to go ahead")
         if branch and box.git(repo, "rev-parse", "--abbrev-ref", "HEAD") != branch:
             record["anomalies"].append(f"session {i + 1} left the repo on another branch")
             box.git(repo, "checkout", "-q", branch, as_=engineer)

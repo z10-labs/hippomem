@@ -96,13 +96,16 @@ Answer-key records it might describe:
 {candidates}
 </answer_key>
 
-Judge only what the proposal says, not what it could have meant. Return one JSON object and nothing else:
+Judge only what the proposal says, not what it could have meant. Ids like D-0012 or P-0003 are the memory's own
+record ids, not claims; ignore them. Return one JSON object and nothing else:
 {{
   "match": "<answer-key id, or null if it describes none of them>",
   "statement_correct": true | false,       // the decision itself matches the record
   "why": "correct" | "partial" | "wrong" | "missing",   // the reason given vs the record's reason
   "alternatives_found": ["<record's rejected options the proposal also names>"],
-  "invented": ["<claims in the proposal that contradict the record or that the record doesn't support and that matter>"],
+  "contradicts": ["<claims that contradict an answer-key record>"],
+  "extra": ["<implementation details or context the answer key doesn't cover, but doesn't contradict>"],
+  "replaces": "<answer-key id this proposal says it replaces, or null>",
   "notes": "<one sentence>"
 }}"""
 
