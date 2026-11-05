@@ -142,7 +142,7 @@ def _decision_hits(conn: sqlite3.Connection, q: np.ndarray, repo: str | None, sc
 
     for hit in list(hits):
         for link in hit.decision.links:
-            if link.other in seen:
+            if link.other in seen or not decisions.exists(conn, link.other):
                 continue
             seen.add(link.other)
             linked = decisions.get(conn, link.other)
@@ -211,6 +211,10 @@ def chain(conn: sqlite3.Connection, decision_id: str, max_depth: int = 5) -> dic
                 continue
             seen.add(other)
             label = link_type if direction == "out" else decisions.INVERSE[link_type]
+            if not decisions.exists(conn, other):  # an explored record: a leaf
+                x = explored.get(conn, other)
+                nodes.append({"id": other, "title": f"EXPLORED: {x.title}", "status": "explored", "link": label, "children": []})
+                continue
             d = decisions.get(conn, other)
             nodes.append({"id": other, "title": d.title, "status": d.status, "link": label, "children": walk(other, direction, depth + 1, seen)})
         return nodes

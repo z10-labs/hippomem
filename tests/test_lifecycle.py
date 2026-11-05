@@ -140,13 +140,13 @@ def test_merge_keeps_explored_lessons_and_ignores_explored_without_revisit_condi
     assert drafts.get(conn, vague).status == "discarded"
 
 
-def test_scope_wide_drafts_go_to_owners_without_the_judge(conn, judge_stub):
+def test_scope_wide_drafts_go_to_owners_even_when_the_judge_fails(conn, judge_stub):
     b = trail_branch(conn)
     add(conn, b, "Billing owns all money writes", why="one place to audit", scope="system", system_id="billing")
     result = lifecycle.on_merge(conn, POLICY, "product-api", "feat/refund-window", "main", "diff", [])
     p = proposals.get(conn, result["proposals"][0])
-    assert (p.source, p.payload["scope"], p.payload["systems"]) == ("scope", "system", ["billing"])
-    assert judge_stub.prompts == []
+    assert (p.kind, p.source, p.payload["scope"], p.payload["systems"]) == ("new", "scope", "system", ["billing"])
+    assert "Team- or system-wide drafts" in judge_stub.prompts[0]  # asked only what it replaces
 
 
 def test_merge_of_unknown_branch_is_ignored_and_logged(conn):

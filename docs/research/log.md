@@ -111,3 +111,7 @@ The scenario harness (S1–S9) three times, plus two reruns of S5, S7 and S8 aft
 - Every before-edit lookup in that run repeated D-0002, D-0021 and D-0022.
 
 Full R1 summary and what R2 changes: [r1-baseline.md](r1-baseline.md). R1 spend $50.14; total $52.07.
+
+## 2026-11-06: correction to the P06 finding
+
+The R1 entry said team-wide rules suppressed the ask-the-author hint. Wrong: the hint's condition ignores them. The real gate is `MIN_COMMITS_TO_ASK_AUTHOR = 3`, and `src/payouts/rounding.py` has one commit (Jo, 2025). Corrected in r1-baseline.md. The separate point stands: every before-edit lookup repeats the team-wide rules.

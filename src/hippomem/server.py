@@ -26,6 +26,9 @@ and the dead ends already explored.
 - Explored records are dead ends, not decisions: check their "Revisit if" before trying the same thing.
 - When you decide or reverse something, call hippomem_draft right away with the reason. Drafts are
   cheap and unreviewed; the merge decides which ones become proposals.
+- When your decision changes or replaces a decision in force (a D- id from the digest or a query),
+  say so: supersedes=<that id> on hippomem_draft or hippomem_propose. Otherwise the old decision
+  stays in force next to the new one.
 - A decision that covers a whole module, service or team and won't show up in a diff: ask your
   engineer, then hippomem_propose with scope "system" or "team".
 - Only call hippomem_decide after your engineer has said yes or no to that proposal. Never accept on
@@ -119,6 +122,7 @@ def _register_tools(mcp: FastMCP, mem: service.Memory) -> None:
         """Propose a decision directly, for one that covers a module, service or
         team (scope "system" or "team") and won't show up in a diff. Ask your
         engineer first. Code-level decisions go through hippomem_draft instead.
+        If it replaces a decision in force, pass supersedes=<that D- id>.
 
         alternatives: [{"option": "...", "reason": "why rejected"}]
         constraints:  [{"text": "...", "kind": "technical|org|external", "revisit_if": "..."}]
@@ -181,6 +185,7 @@ def _register_tools(mcp: FastMCP, mem: service.Memory) -> None:
         paths: list[str] | None = None,
         replaces: int | None = None,
         replaced_because: str = "",
+        supersedes: str = "",
         repo: str = "",
         branch: str = "",
         session: str = "",
@@ -189,6 +194,7 @@ def _register_tools(mcp: FastMCP, mem: service.Memory) -> None:
 
         kind: "decided" or "considering". To reverse an earlier draft, draft the new
         choice with replaces=<old draft id> and replaced_because=<why the old one was dropped>.
+        If this changes or reverses a decision in force (a D- id), pass supersedes=<that id>.
         scope: "code" (default), or "system"/"team" for a rule covering a whole module,
         service or team. paths: repo-relative files or folders the decision is about.
         """
@@ -205,6 +211,7 @@ def _register_tools(mcp: FastMCP, mem: service.Memory) -> None:
                 paths=paths,
                 replaces=replaces,
                 replaced_because=replaced_because,
+                supersedes=supersedes,
                 repo=repo,
                 branch=branch,
                 session_id=session,

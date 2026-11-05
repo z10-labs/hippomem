@@ -12,8 +12,11 @@ from dataclasses import dataclass, field
 
 from hippomem import db, embedding
 
-LINK_TYPES = ("depends-on", "supersedes", "conflicts-with")
-INVERSE = {"depends-on": "depended-on-by", "supersedes": "superseded-by", "conflicts-with": "conflicts-with"}
+LINK_TYPES = ("depends-on", "supersedes", "conflicts-with", "informed-by")
+INVERSE = {"depends-on": "depended-on-by", "supersedes": "superseded-by", "conflicts-with": "conflicts-with", "informed-by": "informed"}
+# Who or what derived a link: an engineer, an agent acting for one, the merge
+# judge, or a rule (a supersession link follows from the accepted proposal).
+DERIVED_BY = ("engineer", "agent", "judge", "rule")
 
 
 @dataclass(frozen=True)
@@ -37,8 +40,11 @@ class Anchor:
 
 @dataclass(frozen=True)
 class Link:
-    type: str  # depends-on | supersedes | conflicts-with, or an inverse when read from the other end
-    other: str
+    type: str  # depends-on | supersedes | conflicts-with | informed-by, or an inverse when read from the other end
+    other: str  # a decision id, or an explored record id for informed-by
+    # Provenance, not identity: two links are the same edge whoever derived them.
+    derived_by: str = field(default="engineer", compare=False)
+    confidence: float | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
@@ -64,6 +70,7 @@ class Decision:
     alternatives: tuple[Alternative, ...] = ()
     constraints: tuple[Constraint, ...] = ()
     links: tuple[Link, ...] = field(default=())  # outbound and inverse links
+    valid_to: str | None = None  # when this version stopped being in force
 
 
 @dataclass(frozen=True)
@@ -97,7 +104,7 @@ class Content:
             anchors=tuple(Anchor(a["repo"], a["path_glob"]) for a in payload.get("anchors", ())),
             alternatives=tuple(Alternative(a["option"], a["reason"]) for a in payload.get("alternatives", ())),
             constraints=tuple(Constraint(c["text"], c.get("kind", "technical"), c.get("revisit_if", "")) for c in payload.get("constraints", ())),
-            links=tuple(Link(lk["type"], lk["to"]) for lk in payload.get("links", ())),
+            links=tuple(Link(lk["type"], lk["to"], lk.get("derived_by", "engineer"), lk.get("confidence")) for lk in payload.get("links", ())),
         )
 
 
@@ -201,19 +208,52 @@ def _write_version(
             (decision_id, con.text, con.kind, con.revisit_if),
         )
     for link in c.links:
-        add_link(conn, decision_id, link.type, link.other)
+        add_link(conn, decision_id, link.type, link.other, derived_by=link.derived_by, confidence=link.confidence, source=proposal_id)
 
 
-def add_link(conn: sqlite3.Connection, from_id: str, link_type: str, to_id: str) -> None:
+def link_target_exists(conn: sqlite3.Connection, link_type: str, to_id: str) -> bool:
+    """A link points at a decision, or, for informed-by, at an explored record too."""
+    if exists(conn, to_id):
+        return True
+    return link_type == "informed-by" and conn.execute("SELECT 1 FROM explored WHERE id = ?", (to_id,)).fetchone() is not None
+
+
+def add_link(
+    conn: sqlite3.Connection,
+    from_id: str,
+    link_type: str,
+    to_id: str,
+    *,
+    derived_by: str = "engineer",
+    confidence: float | None = None,
+    source: str = "",
+) -> None:
     if link_type not in LINK_TYPES:
         raise ValueError(f"unknown link type {link_type!r}; expected one of {', '.join(LINK_TYPES)}")
-    if conn.execute("SELECT 1 FROM decision WHERE id = ?", (to_id,)).fetchone() is None:
+    if derived_by not in DERIVED_BY:
+        raise ValueError(f"unknown link origin {derived_by!r}")
+    if not link_target_exists(conn, link_type, to_id):
         raise KeyError(to_id)
-    conn.execute("INSERT OR IGNORE INTO link (from_id, type, to_id) VALUES (?, ?, ?)", (from_id, link_type, to_id))
+    conn.execute(
+        "INSERT OR IGNORE INTO link (from_id, type, to_id, derived_by, confidence, source, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (from_id, link_type, to_id, derived_by, confidence, source, db.now()),
+    )
 
 
 def set_status(conn: sqlite3.Connection, decision_id: str, status: str) -> None:
     conn.execute("UPDATE decision SET status = ? WHERE id = ?", (status, decision_id))
+    if status != "accepted":
+        conn.execute(
+            """UPDATE decision_version SET valid_to = ?
+               WHERE decision_id = ? AND version = (SELECT current_version FROM decision WHERE id = ?) AND valid_to IS NULL""",
+            (db.now(), decision_id, decision_id),
+        )
+
+
+def supersede(conn: sqlite3.Connection, new_id: str, old_id: str, source: str = "") -> None:
+    """`new_id` replaces `old_id`: the old one leaves force now, and the two are linked."""
+    add_link(conn, new_id, "supersedes", old_id, derived_by="rule", source=source)
+    set_status(conn, old_id, "superseded")
 
 
 def mark_implemented(conn: sqlite3.Connection, decision_id: str) -> None:
@@ -277,9 +317,16 @@ def embeddings(conn: sqlite3.Connection) -> list[tuple[str, str, bytes]]:
     return [(r[0], r[1], r[2]) for r in rows]
 
 
-def links_of(conn: sqlite3.Connection, decision_id: str) -> tuple[Link, ...]:
-    outbound = [Link(r[0], r[1]) for r in conn.execute("SELECT type, to_id FROM link WHERE from_id = ? ORDER BY to_id", (decision_id,))]
-    inbound = [Link(INVERSE[r[0]], r[1]) for r in conn.execute("SELECT type, from_id FROM link WHERE to_id = ? ORDER BY from_id", (decision_id,))]
+def links_of(conn: sqlite3.Connection, record_id: str) -> tuple[Link, ...]:
+    """Links of a decision or explored record, outbound then inbound (named by their inverse)."""
+    outbound = [
+        Link(r[0], r[1], r[2], r[3])
+        for r in conn.execute("SELECT type, to_id, derived_by, confidence FROM link WHERE from_id = ? ORDER BY to_id", (record_id,))
+    ]
+    inbound = [
+        Link(INVERSE[r[0]], r[1], r[2], r[3])
+        for r in conn.execute("SELECT type, from_id, derived_by, confidence FROM link WHERE to_id = ? ORDER BY from_id", (record_id,))
+    ]
     return tuple(outbound + inbound)
 
 
@@ -315,6 +362,7 @@ def _from_row(conn: sqlite3.Connection, row: sqlite3.Row) -> Decision:
             for r in conn.execute("SELECT text, kind, revisit_if FROM constraint_ WHERE decision_id = ? ORDER BY id", (decision_id,))
         ),
         links=links_of(conn, decision_id),
+        valid_to=row["valid_to"],
     )
 
 
@@ -332,5 +380,5 @@ def content_to_payload(content: Content) -> dict:
         "anchors": [{"repo": a.repo, "path_glob": a.path_glob} for a in content.anchors],
         "alternatives": [{"option": a.option, "reason": a.reason} for a in content.alternatives],
         "constraints": [{"text": c.text, "kind": c.kind, "revisit_if": c.revisit_if} for c in content.constraints],
-        "links": [{"type": lk.type, "to": lk.other} for lk in content.links],
+        "links": [{"type": lk.type, "to": lk.other, "derived_by": lk.derived_by, "confidence": lk.confidence} for lk in content.links],
     }
