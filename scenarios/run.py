@@ -19,7 +19,7 @@ from pathlib import Path
 
 from scenarios import fixtures
 from scenarios.flow import s4_reversal_and_merge, s5_other_branch, s6_closed_branch, s7_turn_nudge, s8_ask_author, s9_review
-from scenarios.harness import Team
+from scenarios.harness import Team, sh
 from scenarios.scenarios import Outcome, s1_settled_argument, s2_dead_end, s3_team_rule
 
 SPEND_CAP_USD = 30.0
@@ -52,6 +52,14 @@ def build_team(root: Path) -> Team:
         team.commit(api, f"payouts: step {i}", {"src/ledger_api/payouts.py": text})
     team.set_author(api, "Alex", "alex@example.com")
     return team
+
+
+def clean_repos(team: Team) -> None:
+    """Throw away anything an earlier scenario's agent left uncommitted, so one
+    agent's untidiness can't crash every later scenario in the same repo."""
+    for repo in (team.root / "repos").iterdir():
+        sh(repo, "git", "reset", "-q", "--hard")
+        sh(repo, "git", "clean", "-q", "-fd")
 
 
 def report(team: Team, outcomes: list[Outcome]) -> str:
@@ -92,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
                 outcomes.append(Outcome(key, f"skipped: spend cap ${SPEND_CAP_USD} reached"))
                 continue
             print(f"[{key}] running (spent so far ${team.spent:.2f})", flush=True)
+            clean_repos(team)
             try:
                 outcomes.append(scenario(team))
             except Exception:

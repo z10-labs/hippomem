@@ -25,3 +25,22 @@ The whole loop ran end to end: two agent sessions, a merge judged into proposals
 - Probe P04 (read the ledger database directly) once per arm on the week-1 sandbox. With the memory: the agent was shown D-0002 (services never read each other's databases) and stopped to ask. Without: it went through the API anyway, because the seed code already does. Like S3 in the scenario harness, P04 may not separate the arms; that's for the baseline to show.
 - Cold read, memory only: 30 answers, graded in one call. At week 1 only Q01 and Q02 are answerable, and both were fully right.
 - R0 total: $1.93. Harness ready for R1.
+
+## 2026-11-06: E0, how noisy single runs are ($8.98)
+
+The scenario harness (S1–S9) three times, plus two reruns of S5, S7 and S8 after a harness fix.
+
+| | Passed |
+|---|---|
+| S1, S2: memory changes what gets built (no Redis, no Kafka, cites the record) | 3/3 every check |
+| S3: no database client, cites the rule | 3/3 |
+| S3: "goes through the ledger API" | 0/3 (the agent stops to ask; the check is wrong, as in October) |
+| S5: mentions the other branch's plan | 2/3 |
+| S6, S7, S8, S9 | 3/3 every check |
+| **S4: drafts recorded on the branch (decide, then reverse)** | **0/2** |
+| **S4: reversal recorded with a reason** | **0/2** |
+| S4: merge produced a proposal with the stored option rejected | 1/2 |
+
+- **Finding:** capturing a reversal across sessions is unreliable. October's single passing S4 run was the lucky one. In the completed runs, session 1 drafted at most once and session 2's reversal was never drafted, despite the end-of-turn nudge (BD-33). The judge reading commit history (BD-34) recovered the rejected option in one run of two. Meridian's M06 and M23 measure this at scale.
+- **Harness fix:** S4's agent left uncommitted files in 2 of 3 runs, and every later scenario that switched branch in that repo crashed. `scenarios/run.py` now resets each repo before each scenario.
+- **Conclusion for the method:** single runs mislead in both directions. Every comparison in R1 onwards runs at least 3 times, as planned.
