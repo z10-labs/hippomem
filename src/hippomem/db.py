@@ -7,6 +7,7 @@ shipped; add a new one.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -275,8 +276,22 @@ MIGRATIONS: list[str] = [
 ]
 
 
+TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+# For simulated time in the research harness: when set, the server reads the
+# current time from this file (one ISO timestamp) instead of the system clock.
+CLOCK_FILE_ENV = "HIPPOMEM_CLOCK_FILE"
+
+
 def utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    clock_file = os.environ.get(CLOCK_FILE_ENV)
+    if clock_file:
+        return Path(clock_file).read_text().strip()
+    return datetime.now(timezone.utc).strftime(TIME_FORMAT)
+
+
+def parse_time(value: str) -> datetime:
+    return datetime.strptime(value, TIME_FORMAT).replace(tzinfo=timezone.utc)
 
 
 # Replaced in tests to make time deterministic.

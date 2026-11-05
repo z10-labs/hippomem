@@ -7,6 +7,7 @@ records usage, and returns plain data or agent-ready text.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 from dataclasses import dataclass, field
@@ -23,6 +24,15 @@ class Memory:
     # One connection serves every request; this keeps requests from
     # interleaving inside a transaction.
     lock: threading.RLock = field(default_factory=threading.RLock)
+
+
+RECORD_ID = re.compile(r"\b[DXPQ]-\d{4,}\b")
+
+
+def shown_ids(text: str) -> list[str]:
+    """Record ids an agent was shown, in order of first appearance, so
+    research can score what reached an agent's context and when."""
+    return list(dict.fromkeys(RECORD_ID.findall(text)))
 
 
 def record_usage(mem: Memory, actor: Actor, action: str, repo: str = "", branch: str = "", **detail: object) -> None:
@@ -49,8 +59,10 @@ def query(mem: Memory, actor: Actor, text: str, repo: str = "", path: str = "", 
             repo,
             branch,
             text=text,
-            decisions=[h.decision.id for h in results.decisions],
-            explored=[h.record.id for h in results.explored],
+            path=path,
+            decisions=[{"id": h.decision.id, "score": round(h.score, 4), "via": h.via, "in_scope": h.in_scope} for h in results.decisions],
+            explored=[{"id": h.record.id, "score": round(h.score, 4)} for h in results.explored],
+            drafts=[h.draft_id for h in results.drafts],
         )
         return render.results(results)
 
@@ -216,14 +228,14 @@ def session_start(mem: Memory, actor: Actor, session_id: str, repo: str, branch:
     with mem.lock:
         session = sessions.start(mem.conn, actor, session_id, repo, branch)
         text = sessions.digest(mem.conn, mem.config.policy, actor, session, mem.config.max_per_session)
-        record_usage(mem, actor, "session_start", repo, branch, session=session_id)
+        record_usage(mem, actor, "session_start", repo, branch, session=session_id, shown=shown_ids(text))
         return text
 
 
 def lookup(mem: Memory, actor: Actor, session_id: str, repo: str, path: str, history: dict | None = None) -> str:
     with mem.lock:
         text = sessions.lookup(mem.conn, mem.config.policy, actor, session_id, repo, path, history)
-        record_usage(mem, actor, "lookup", repo, session=session_id, path=path, hit=bool(text))
+        record_usage(mem, actor, "lookup", repo, session=session_id, path=path, hit=bool(text), shown=shown_ids(text))
         return text
 
 
