@@ -73,3 +73,17 @@ Decisions covering a whole module, service or team skip the judge: they go to an
 ## Moving to remote later
 
 The roles, data model and event flow don't change. What changes: the SQLite file becomes Postgres (pgvector for embeddings), git events come from a GitHub app instead of local hooks, tokens come from a real identity provider, and the review queue gets a web page. The module boundaries above are where those swaps happen.
+
+### What relies on one writer at a time
+
+Every write runs inside `db.transaction()`, which opens with `BEGIN IMMEDIATE`, so SQLite lets one writer through at a time. These operations depend on that, and each needs an explicit lock or isolation level when the store moves to Postgres with several server workers:
+
+| Operation | Where | What would break with concurrent writers |
+|---|---|---|
+| Readable IDs (`D-0001`, `P-0001`, `X-0001`, `Q-0001`) | `db.next_id` | Two writers reading the same counter value and issuing the same ID |
+| Accepting a proposal | `proposals.accept` | The status check ("still open", "not your own") and the write racing, so a proposal is applied twice or by someone not allowed to |
+| Merge reconciliation | `reconcile` | Two merge events for the same branch both turning its drafts into proposals |
+| Draft replacement (`replaces`) | `drafts` | A draft being replaced and proposed at the same moment |
+| Session turn state (the end-of-turn nudge) | `sessions` | A nudge counted twice or not at all |
+
+In Postgres the counter becomes a sequence or `UPDATE ... RETURNING` under row lock, acceptance takes `SELECT ... FOR UPDATE` on the proposal, and reconciliation locks the branch row.
