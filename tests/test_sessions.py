@@ -97,7 +97,7 @@ HISTORY = {
 def test_lookup_suggests_asking_the_author_once_per_session_and_file(conn):
     start(conn)
     text = sessions.lookup(conn, POLICY, ALEX_AGENT, "s1", "product-api", "src/billing/time.py", HISTORY)
-    assert "ask its author" in text and "Sam <sam@example.com>" in text
+    assert "hippomem_ask_author" in text and "Sam <sam@example.com>" in text
     assert sessions.lookup(conn, POLICY, ALEX_AGENT, "s1", "product-api", "src/billing/time.py", HISTORY) == ""
     assert sessions.lookup(conn, POLICY, ALEX_AGENT, "s1", "product-api", "src/billing/new.py", {"commits": 1}) == ""
 
@@ -164,3 +164,11 @@ def test_actor_email_lookup(conn):
     actors.add(conn, "@pat", "engineer", emails=("Pat@Example.com",))
     assert actors.by_email(conn, "pat@example.com") == "@pat"
     assert actors.by_email(conn, "nobody@example.com") is None
+
+
+def test_turn_stop_nudges_after_a_silent_commit(conn):
+    s = start(conn)
+    sessions.turn_start(conn, s.id)
+    conn.execute("INSERT INTO event (kind, repo, branch, payload, at) VALUES ('commit', 'product-api', 'feat/refunds', '{}', '2099-01-01T00:00:00Z')")
+    reason = sessions.turn_stop(conn, s.id, ["src/billing/refunds.py"])
+    assert "committed code" in reason and "replaces=" in reason

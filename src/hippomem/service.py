@@ -333,7 +333,15 @@ def git_event(mem: Memory, actor: Actor, body: dict) -> dict:
             )
         if kind == "merge":
             return lifecycle.on_merge(
-                mem.conn, mem.config.policy, repo, body["branch"], body.get("into", ""), body.get("diff", ""), list(body.get("commits", []))
+                mem.conn,
+                mem.config.policy,
+                repo,
+                body["branch"],
+                body.get("into", ""),
+                body.get("diff", ""),
+                list(body.get("commits", [])),
+                history=body.get("history", ""),
+                merged_by=actor.id,
             )
         if kind == "close":
             return lifecycle.on_close(mem.conn, repo, body["branch"])

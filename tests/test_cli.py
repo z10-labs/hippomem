@@ -31,7 +31,7 @@ def test_init_creates_memory_config_and_admin_token(tmp_path, capsys):
 def test_actor_and_map_commands(tmp_path, capsys):
     home = tmp_path / "hm"
     main(["--home", str(home), "init"])
-    assert main(["--home", str(home), "actor", "add", "@alex"]) == 0
+    assert main(["--home", str(home), "actor", "add", "@alex", "--email", "alex@example.com"]) == 0
     token = capsys.readouterr().out.strip().splitlines()[-1]
     assert token.startswith("hm_")
     config.config_path(home).write_text('[[systems]]\nid = "billing"\nowners = ["@alex"]\n')
@@ -42,7 +42,9 @@ def test_actor_and_map_commands(tmp_path, capsys):
     capsys.readouterr()
     main(["--home", str(home), "map", "list"])
     assert "api:src/billing/**\tbilling\tconfirmed" in capsys.readouterr().out
-    assert systems.systems_for(db.connect(config.db_path(home)), "api", "src/billing/a.py") == ["billing"]
+    conn = db.connect(config.db_path(home))
+    assert systems.systems_for(conn, "api", "src/billing/a.py") == ["billing"]
+    assert actors.by_email(conn, "alex@example.com") == "@alex"
 
 
 def test_client_command_without_token_explains_itself(tmp_path, monkeypatch):

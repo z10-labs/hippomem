@@ -163,7 +163,15 @@ def git_event_body(kind: str, cwd: str, args: list[str]) -> dict | None:
         if not merged or not into_default:
             return None  # only merges into the default branch confirm drafts
         commits, diff = gitinfo.merge_range(cwd)
-        return {"kind": "merge", "repo": repo, "branch": merged, "into": branch, "commits": commits, "diff": diff}
+        return {
+            "kind": "merge",
+            "repo": repo,
+            "branch": merged,
+            "into": branch,
+            "commits": commits,
+            "diff": diff,
+            "history": gitinfo.merge_history(cwd),
+        }
     raise ValueError(f"unknown git event {kind!r}")
 
 

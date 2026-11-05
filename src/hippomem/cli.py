@@ -102,7 +102,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 def cmd_actor_add(args: argparse.Namespace) -> int:
     conn, _ = _open(args)
-    token = actors.add(conn, args.id, args.kind, args.name or "")
+    token = actors.add(conn, args.id, args.kind, args.name or "", tuple(args.email or ()))
     print(token)
     print(f"Created {args.kind} {args.id}. This token is shown once.", file=sys.stderr)
     return 0
@@ -246,6 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("id")
     p.add_argument("--kind", choices=actors.KINDS, default="engineer")
     p.add_argument("--name")
+    p.add_argument("--email", action="append", help="git author email (repeatable), so questions about their code reach them")
     p.set_defaults(func=cmd_actor_add)
     actor.add_parser("list").set_defaults(func=cmd_actor_list)
 

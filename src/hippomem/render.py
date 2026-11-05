@@ -117,6 +117,8 @@ def proposal_line(p: Proposal) -> str:
 def proposal_full(p: Proposal) -> str:
     lines = [proposal_line(p)]
     payload = p.payload
+    if payload.get("inferred"):
+        lines.append("  Inferred from the branch history at merge; nobody drafted it. Check the why before accepting.")
     if p.target:
         lines.append(f"  Target: {p.target}")
     for key in ("statement", "why", "trade_off"):

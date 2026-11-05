@@ -111,6 +111,12 @@ def merged_branch(cwd: Path | str) -> str:
     return message[len("merge ") :].split(":", 1)[0].strip()
 
 
+def merge_history(cwd: Path | str, limit_chars: int = 30_000) -> str:
+    """Commits brought in by the last merge, oldest first, each with its
+    message and patch, so options built and then reversed are visible."""
+    return git(cwd, "log", "--reverse", "--no-merges", "-p", "--format=--- commit %h %an%n%s%n%b", "ORIG_HEAD..HEAD")[:limit_chars]
+
+
 def merge_range(cwd: Path | str) -> tuple[list[str], str]:
     """Commits and diff brought in by the last merge (ORIG_HEAD..HEAD)."""
     commits = [c for c in git(cwd, "rev-list", "ORIG_HEAD..HEAD").splitlines() if c]
