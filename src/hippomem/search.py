@@ -56,7 +56,7 @@ class DraftHit:
     title: str
     statement: str
     why: str
-    kind: str
+    kind: str  # decided | considering | dropped
     engineer: str
     own_branch: bool
     score: float
@@ -167,9 +167,9 @@ def _explored_hits(conn: sqlite3.Connection, q: np.ndarray) -> list[ExploredHit]
 
 def _draft_hits(conn: sqlite3.Connection, q: np.ndarray, branch_id: int | None) -> list[DraftHit]:
     rows = conn.execute(
-        """SELECT d.id, b.id AS branch_id, b.repo, b.name, d.title, d.statement, d.why, d.kind, d.engineer, d.embedding
+        """SELECT d.id, b.id AS branch_id, b.repo, b.name, d.title, d.statement, d.why, d.kind, d.status, d.dropped_reason, d.engineer, d.embedding
            FROM draft d JOIN branch b ON b.id = d.branch_id
-           WHERE b.state = 'active' AND d.status IN ('open', 'backed') AND d.embedding IS NOT NULL
+           WHERE b.state = 'active' AND d.status IN ('open', 'dropped') AND d.embedding IS NOT NULL
            ORDER BY d.id"""
     ).fetchall()
     raw = _scores([r["embedding"] for r in rows], q)
@@ -180,8 +180,8 @@ def _draft_hits(conn: sqlite3.Connection, q: np.ndarray, branch_id: int | None) 
             branch=r["name"],
             title=r["title"],
             statement=r["statement"],
-            why=r["why"],
-            kind=r["kind"],
+            why=r["dropped_reason"] if r["status"] == "dropped" else r["why"],
+            kind="dropped" if r["status"] == "dropped" else r["kind"],
             engineer=r["engineer"],
             own_branch=r["branch_id"] == branch_id,
             score=s,

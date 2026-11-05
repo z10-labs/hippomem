@@ -12,7 +12,7 @@ import threading
 from dataclasses import dataclass, field
 
 from hippomem import config as cfg
-from hippomem import db, decisions, proposals, render, search, systems
+from hippomem import db, decisions, drafts, lifecycle, proposals, render, search, sessions, systems
 from hippomem.policy import Actor
 
 
@@ -189,3 +189,154 @@ def decide(mem: Memory, actor: Actor, proposal_id: str, accept: bool, note: str 
             outcome = f"No proposal {proposal_id}."
         record_usage(mem, actor, "decide", proposal=proposal_id, accept=accept, outcome=outcome)
         return outcome
+
+
+# --- sessions, drafts and git events (phase 4) ---------------------------------
+
+
+def _resolve(mem: Memory, actor: Actor, repo: str, branch: str, session_id: str) -> tuple[str, str, str]:
+    """Fill in repo, branch and session from the session when a tool call left them out."""
+    found = None
+    if session_id:
+        try:
+            found = sessions.get(mem.conn, session_id)
+        except KeyError:
+            found = None
+    if found is None and not (repo and branch):
+        found = sessions.latest_for(mem.conn, actor, repo)
+    if found is not None:
+        repo = repo or found.repo
+        if not branch and found.branch_id:
+            branch = drafts.get_branch(mem.conn, found.branch_id).name
+        session_id = session_id or found.id
+    return repo, branch, session_id
+
+
+def session_start(mem: Memory, actor: Actor, session_id: str, repo: str, branch: str) -> str:
+    with mem.lock:
+        session = sessions.start(mem.conn, actor, session_id, repo, branch)
+        text = sessions.digest(mem.conn, mem.config.policy, actor, session, mem.config.max_per_session)
+        record_usage(mem, actor, "session_start", repo, branch, session=session_id)
+        return text
+
+
+def lookup(mem: Memory, actor: Actor, session_id: str, repo: str, path: str, history: dict | None = None) -> str:
+    with mem.lock:
+        text = sessions.lookup(mem.conn, mem.config.policy, actor, session_id, repo, path, history)
+        record_usage(mem, actor, "lookup", repo, session=session_id, path=path, hit=bool(text))
+        return text
+
+
+def turn_start(mem: Memory, actor: Actor, session_id: str) -> None:
+    with mem.lock:
+        sessions.turn_start(mem.conn, session_id)
+
+
+def turn_stop(mem: Memory, actor: Actor, session_id: str, changed: list[str]) -> str:
+    with mem.lock:
+        reason = sessions.turn_stop(mem.conn, session_id, changed)
+        record_usage(mem, actor, "turn_stop", session=session_id, changed=changed, nudged=bool(reason))
+        return reason
+
+
+def draft(
+    mem: Memory,
+    actor: Actor,
+    *,
+    title: str,
+    why: str,
+    kind: str = "decided",
+    statement: str = "",
+    scope: str = "code",
+    system: str = "",
+    paths: list[str] | None = None,
+    replaces: int | None = None,
+    replaced_because: str = "",
+    repo: str = "",
+    branch: str = "",
+    session_id: str = "",
+) -> str:
+    with mem.lock:
+        repo, branch, session_id = _resolve(mem, actor, repo, branch, session_id)
+        if not repo or not branch:
+            raise ValueError("pass repo and branch (they're in the session digest)")
+        branch_id = drafts.ensure_branch(mem.conn, repo, branch)
+        draft_id = drafts.add(
+            mem.conn,
+            branch_id,
+            title=title,
+            why=why,
+            engineer=actor.id,
+            agent=actor.agent,
+            session_id=session_id,
+            kind=kind,
+            statement=statement,
+            scope=scope,
+            system_id=system or None,
+            paths=tuple(paths or ()),
+            replaces=replaces,
+            replaced_because=replaced_because,
+        )
+        record_usage(mem, actor, "draft", repo, branch, draft=draft_id, replaces=replaces, scope=scope)
+        note = f" Draft #{replaces} is now dropped." if replaces else ""
+        return f"Drafted #{draft_id} on {repo}:{branch}.{note} It becomes a proposal only if the merge shows it was built."
+
+
+def drop(mem: Memory, actor: Actor, draft_id: int, why: str) -> str:
+    with mem.lock:
+        drafts.drop(mem.conn, draft_id, why)
+        record_usage(mem, actor, "drop", draft=draft_id)
+        return f"Dropped draft #{draft_id}."
+
+
+def trail(mem: Memory, actor: Actor, repo: str = "", branch: str = "", session_id: str = "") -> str:
+    with mem.lock:
+        repo, branch, session_id = _resolve(mem, actor, repo, branch, session_id)
+        found = drafts.find_active(mem.conn, repo, branch)
+        if found is None:
+            return f"No drafts on {repo}:{branch} yet."
+        lines = [sessions._trail_line(d) for d in drafts.trail(mem.conn, found.id)]
+        return "\n".join(lines) or f"No drafts on {repo}:{branch} yet."
+
+
+def ask_author(mem: Memory, actor: Actor, repo: str, path: str, question: str, history: dict) -> str:
+    with mem.lock:
+        text = sessions.ask_author(mem.conn, actor, repo, path, question, history)
+        record_usage(mem, actor, "ask_author", repo, path=path)
+        return text
+
+
+def answer_question(mem: Memory, actor: Actor, question_id: str, title: str, why: str, alternatives: list[dict] | None = None) -> str:
+    with mem.lock:
+        p = sessions.answer(mem.conn, mem.config.policy, actor, question_id, title, why, alternatives)
+        record_usage(mem, actor, "answer", question=question_id, proposal=p.id)
+        return f"Recorded as proposal {p.id}; another engineer or a reviewer accepts it."
+
+
+def git_event(mem: Memory, actor: Actor, body: dict) -> dict:
+    kind = body.get("kind", "")
+    repo = body.get("repo", "")
+    with mem.lock:
+        record_usage(mem, actor, f"event:{kind}", repo, body.get("branch", ""))
+        if kind == "checkout":
+            return lifecycle.on_checkout(mem.conn, repo, body.get("branch", ""))
+        if kind == "commit":
+            return lifecycle.on_commit(
+                mem.conn,
+                mem.config.policy,
+                repo,
+                body.get("branch", ""),
+                body["commit"],
+                list(body.get("files", [])),
+                body.get("diff", ""),
+                body.get("default_branch", ""),
+            )
+        if kind == "merge":
+            return lifecycle.on_merge(
+                mem.conn, mem.config.policy, repo, body["branch"], body.get("into", ""), body.get("diff", ""), list(body.get("commits", []))
+            )
+        if kind == "close":
+            return lifecycle.on_close(mem.conn, repo, body["branch"])
+        if kind == "close_stale":
+            return {"closed": lifecycle.close_stale(mem.conn, mem.config.stale_after_days)}
+        raise ValueError(f"unknown event kind {kind!r}")

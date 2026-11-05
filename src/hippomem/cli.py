@@ -8,6 +8,7 @@ caller's token, from $HIPPOMEM_TOKEN or the `token` file in the Hippomem home.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -15,7 +16,7 @@ from typing import Any, Optional
 
 import httpx
 
-from hippomem import __version__, actors, db, systems
+from hippomem import __version__, actors, db, hooks, systems
 from hippomem import config as cfg
 
 
@@ -85,8 +86,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     from hippomem import server, service
 
+    from hippomem import lifecycle
+
     conn, config = _open(args)
     cfg.apply(conn, config)
+    closed = lifecycle.close_stale(conn, config.stale_after_days)
+    if closed:
+        print(f"Closed {len(closed)} stale branches: {', '.join(closed)}")
     mem = service.Memory(conn=conn, config=config)
     app = server.create(mem).streamable_http_app()
     print(f"Hippomem serving on {config.url} (MCP at {config.url}/mcp)")
@@ -182,6 +188,47 @@ def cmd_reject(args: argparse.Namespace) -> int:
     return _decide(args, False)
 
 
+# --- hooks and installation -------------------------------------------------
+
+
+def cmd_hook(args: argparse.Namespace) -> int:
+    return hooks.run_claude_hook(args.name, _home(args))
+
+
+def cmd_git_event(args: argparse.Namespace) -> int:
+    return hooks.run_git_event(args.kind, _home(args), args.args)
+
+
+def cmd_install_git_hooks(args: argparse.Namespace) -> int:
+    for path in hooks.install_git_hooks(args.repo, _home(args), force=args.force):
+        print(f"wrote {path}")
+    return 0
+
+
+def cmd_install_claude_code(args: argparse.Namespace) -> int:
+    if args.print:
+        url = cfg.load(cfg.config_path(_home(args))).url
+        print(json.dumps({".mcp.json": hooks.mcp_config(url), ".claude/settings.local.json": hooks.claude_settings(_home(args))}, indent=2))
+        return 0
+    for path in hooks.install_claude_code(args.project, _home(args)):
+        print(f"wrote {path}")
+    print("Set HIPPOMEM_TOKEN in your shell (or run `hippomem login`) before starting Claude Code.")
+    return 0
+
+
+def cmd_branch_close(args: argparse.Namespace) -> int:
+    from hippomem import gitinfo
+
+    repo = args.repo or gitinfo.repo_name(os.getcwd())
+    print(json.dumps(_call(args, "POST", "/api/event", json={"kind": "close", "repo": repo, "branch": args.branch}), indent=2))
+    return 0
+
+
+def cmd_branch_close_stale(args: argparse.Namespace) -> int:
+    print(json.dumps(_call(args, "POST", "/api/event", json={"kind": "close_stale"}), indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hippomem", description="A team's engineering memory for AI coding agents.")
     parser.add_argument("--version", action="version", version=f"hippomem {__version__}")
@@ -242,6 +289,31 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("id")
         p.add_argument("--note")
         p.set_defaults(func=func)
+    p = sub.add_parser("hook", help="run a Claude Code hook (reads the hook JSON on stdin)")
+    p.add_argument("name", choices=sorted(hooks.CLAUDE_HOOKS))
+    p.set_defaults(func=cmd_hook)
+
+    p = sub.add_parser("git-event", help="send a git event (called by the git hooks)")
+    p.add_argument("kind", choices=("checkout", "commit", "merge"))
+    p.add_argument("args", nargs="*")
+    p.set_defaults(func=cmd_git_event)
+
+    install = sub.add_parser("install", help="install hooks").add_subparsers(dest="install_command", required=True)
+    p = install.add_parser("git-hooks", help="post-commit, post-merge and post-checkout hooks in a repo")
+    p.add_argument("--repo", default=".")
+    p.add_argument("--force", action="store_true", help="overwrite existing hooks that aren't Hippomem's")
+    p.set_defaults(func=cmd_install_git_hooks)
+    p = install.add_parser("claude-code", help="MCP server and hooks for Claude Code in a project")
+    p.add_argument("--project", default=".")
+    p.add_argument("--print", action="store_true", help="print the configuration instead of writing it")
+    p.set_defaults(func=cmd_install_claude_code)
+
+    branch = sub.add_parser("branch", help="branch lifecycle").add_subparsers(dest="branch_command", required=True)
+    p = branch.add_parser("close", help="a branch was abandoned: sort its drafts into explored records")
+    p.add_argument("branch")
+    p.add_argument("--repo")
+    p.set_defaults(func=cmd_branch_close)
+    branch.add_parser("close-stale", help="close branches inactive longer than branches.stale_after_days").set_defaults(func=cmd_branch_close_stale)
     return parser
 
 

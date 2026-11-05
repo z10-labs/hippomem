@@ -22,7 +22,7 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def add(conn: sqlite3.Connection, actor_id: str, kind: str, name: str = "") -> str:
+def add(conn: sqlite3.Connection, actor_id: str, kind: str, name: str = "", emails: tuple[str, ...] = ()) -> str:
     """Create an actor and return its token. The token is shown once."""
     if kind not in KINDS:
         raise ValueError(f"actor kind must be one of {', '.join(KINDS)}")
@@ -30,8 +30,8 @@ def add(conn: sqlite3.Connection, actor_id: str, kind: str, name: str = "") -> s
         raise ValueError("engineer ids start with '@', e.g. @alex")
     token = TOKEN_PREFIX + secrets.token_urlsafe(24)
     conn.execute(
-        "INSERT INTO actor (id, kind, name, token_hash, created_at) VALUES (?, ?, ?, ?, ?)",
-        (actor_id, kind, name or actor_id, _hash(token), db.now()),
+        "INSERT INTO actor (id, kind, name, token_hash, emails, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (actor_id, kind, name or actor_id, _hash(token), ",".join(e.strip().lower() for e in emails), db.now()),
     )
     return token
 
@@ -54,6 +54,15 @@ def from_token(conn: sqlite3.Connection, token: str, agent: str = "") -> Actor |
         return None
     row = conn.execute("SELECT id, kind FROM actor WHERE token_hash = ?", (_hash(token),)).fetchone()
     return Actor(row[0], row[1], agent) if row else None
+
+
+def by_email(conn: sqlite3.Connection, email: str) -> str | None:
+    """The engineer whose git author email this is, if anyone registered it."""
+    wanted = email.strip().lower()
+    for actor_id, emails in conn.execute("SELECT id, emails FROM actor WHERE emails != ''"):
+        if wanted in emails.split(","):
+            return str(actor_id)
+    return None
 
 
 def list_all(conn: sqlite3.Connection) -> list[sqlite3.Row]:

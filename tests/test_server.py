@@ -138,3 +138,61 @@ def test_api_query_and_decide(client, tokens, conn):
     assert client.get("/api/proposals", headers=headers).json() == {"proposals": []}
     assert client.post("/api/decide", json={"proposal_id": "P-0404", "accept": True}, headers=headers).json() == {"text": "No proposal P-0404."}
     assert client.post("/api/query", json={}, headers=headers).status_code == 400
+
+
+def api(client, token, path, body):
+    response = client.post(path, json=body, headers={"Authorization": f"Bearer {token}", "X-Hippomem-Agent": "claude-code"})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_draft_tools_use_the_session_for_repo_and_branch(client, tokens):
+    digest = api(client, tokens["@pat"], "/api/session/start", {"session_id": "s1", "repo": "product-api", "branch": "feat/limits"})["text"]
+    assert 'session="s1"' in digest
+    text, _ = call_tool(client, tokens["@pat"], "hippomem_draft", title="Redis counters", why="fast", session="s1")
+    assert text.startswith("Drafted #1 on product-api:feat/limits")
+    text, _ = call_tool(
+        client,
+        tokens["@pat"],
+        "hippomem_draft",
+        title="Postgres advisory locks",
+        why="no new service",
+        replaces=1,
+        replaced_because="another service to run",
+    )
+    assert "Draft #1 is now dropped" in text
+    trail, _ = call_tool(client, tokens["@pat"], "hippomem_trail", session="s1")
+    assert "#1 dropped: Redis counters. Because: another service to run" in trail
+    text, _ = call_tool(client, tokens["@pat"], "hippomem_draft", title="x", why="y", replaces=99)
+    assert text.startswith("Not drafted")
+    text, _ = call_tool(client, tokens["@pat"], "hippomem_drop", draft_id=2, why="")
+    assert text.startswith("Not dropped")
+    assert call_tool(client, tokens["@pat"], "hippomem_drop", draft_id=2, why="changed our mind")[0] == "Dropped draft #2."
+
+
+def test_ask_and_answer_tools(client, tokens, conn):
+    text, _ = call_tool(
+        client,
+        tokens["@pat"],
+        "hippomem_ask_author",
+        repo="product-api",
+        path="src/billing/time.py",
+        question="why UTC?",
+        author_email="sam@example.com",
+    )
+    assert text.startswith("Asked sam@example.com (Q-0001)")
+    conn.execute("UPDATE question SET to_engineer = '@pat'")
+    text, _ = call_tool(client, tokens["@pat"], "hippomem_answer", question_id="Q-0001", title="Timestamps are UTC", why="zones")
+    assert text.startswith("Recorded as proposal P-0001")
+    assert call_tool(client, tokens["@pat"], "hippomem_answer", question_id="Q-0001", title="t", why="w")[0].startswith("Not recorded")
+
+
+def test_event_and_turn_endpoints(client, tokens):
+    assert api(client, tokens["@pat"], "/api/event", {"kind": "checkout", "repo": "product-api", "branch": "feat/x"})["branch_id"] == 1
+    api(client, tokens["@pat"], "/api/session/start", {"session_id": "s1", "repo": "product-api", "branch": "feat/x"})
+    assert api(client, tokens["@pat"], "/api/turn/start", {"session_id": "s1"}) == {"ok": True}
+    assert "package.json" in api(client, tokens["@pat"], "/api/turn/stop", {"session_id": "s1", "changed": ["package.json"]})["reason"]
+    assert api(client, tokens["@pat"], "/api/lookup", {"session_id": "s1", "repo": "product-api", "path": "README.md"}) == {"text": ""}
+    response = client.post("/api/event", json={"kind": "explode"}, headers={"Authorization": f"Bearer {tokens['@pat']}"})
+    assert response.status_code == 400
+    assert api(client, tokens["@pat"], "/api/event", {"kind": "close_stale"}) == {"closed": []}
