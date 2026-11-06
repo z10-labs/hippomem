@@ -74,7 +74,7 @@ def get_decision(mem: Memory, actor: Actor, decision_id: str) -> str:
             d = decisions.get(mem.conn, decision_id)
         except KeyError:
             return f"No decision {decision_id}."
-        lines = [render.decision_full(d)]
+        lines = [render.decision_full(d), *render.lineage(search.lineage(mem.conn, decision_id), decision_id)]
         for ev in decisions.evidence_for(mem.conn, decision_id):
             lines.append(f"  Evidence: {ev['kind']} {ev['ref']} {ev['note']}".rstrip())
         return "\n".join(lines)
@@ -264,6 +264,7 @@ def draft(
     paths: list[str] | None = None,
     replaces: int | None = None,
     replaced_because: str = "",
+    supersedes: str = "",
     repo: str = "",
     branch: str = "",
     session_id: str = "",
@@ -288,10 +289,29 @@ def draft(
             paths=tuple(paths or ()),
             replaces=replaces,
             replaced_because=replaced_because,
+            supersedes=supersedes or None,
         )
-        record_usage(mem, actor, "draft", repo, branch, draft=draft_id, replaces=replaces, scope=scope)
+        related = [] if supersedes else _related_in_force(mem, f"{title}. {statement} {why}", repo)
+        record_usage(mem, actor, "draft", repo, branch, draft=draft_id, replaces=replaces, scope=scope, supersedes=supersedes, related=related)
         note = f" Draft #{replaces} is now dropped." if replaces else ""
-        return f"Drafted #{draft_id} on {repo}:{branch}.{note} It becomes a proposal only if the merge shows it was built."
+        note += f" Marked as replacing {supersedes}." if supersedes else ""
+        text = f"Drafted #{draft_id} on {repo}:{branch}.{note} It becomes a proposal only if the merge shows it was built."
+        if related:
+            listed = "; ".join(f"{d.id} {d.title}" for d in related)
+            text += (
+                f"\nDecisions in force that look related: {listed}. If this draft changes or replaces one of them,"
+                f" draft it again with replaces={draft_id} and supersedes=<that id>, so the old one leaves force when this is accepted."
+            )
+        return text
+
+
+RELATED_DRAFT_SCORE = 0.55
+
+
+def _related_in_force(mem: Memory, text: str, repo: str) -> list[decisions.Decision]:
+    """Decisions in force close enough to a new draft that it may replace one."""
+    found = search.query(mem.conn, text, repo=repo or None, top_n=3)
+    return [h.decision for h in found.decisions if h.via == "direct" and h.decision.status == "accepted" and h.score >= RELATED_DRAFT_SCORE][:2]
 
 
 def drop(mem: Memory, actor: Actor, draft_id: int, why: str) -> str:

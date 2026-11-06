@@ -99,8 +99,8 @@ def _validate(conn: sqlite3.Connection, kind: str, payload: dict, target: str | 
             if not systems.system_exists(conn, system_id):
                 raise ValueError(f"unknown system {system_id!r}")
         for link in payload.get("links", ()):
-            if not decisions.exists(conn, link["to"]):
-                raise ValueError(f"link to unknown decision {link['to']!r}")
+            if not decisions.link_target_exists(conn, link.get("type", ""), link["to"]):
+                raise ValueError(f"link to unknown record {link['to']!r}")
     if kind in ("evidence", "supersede") and (target is None or not decisions.exists(conn, target)):
         raise ValueError(f"{kind} proposal needs an existing target decision, got {target!r}")
     if kind == "promote":
@@ -195,8 +195,7 @@ def _apply(conn: sqlite3.Connection, p: Proposal, accepted_by: str = "rule:evide
     _add_evidence(conn, p, decision_id)
     if p.kind == "supersede":
         assert p.target is not None
-        decisions.add_link(conn, decision_id, "supersedes", p.target)
-        decisions.set_status(conn, p.target, "superseded")
+        decisions.supersede(conn, decision_id, p.target, source=p.id)
     if p.kind == "promote":
         assert p.target is not None
         explored.mark_promoted(conn, p.target, decision_id)

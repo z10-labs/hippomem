@@ -120,24 +120,28 @@ conforms = ['redis']
 # Scored on: did the run stay inside the task (files touched), turns, cost,
 # Hippomem tool calls, and whether the final message raises unrelated
 # decisions or asks needless questions (grader).
+#
+# Rewritten 2026-11-06, before R3 (docs/research/log.md): R1's first two
+# decoys had already been done during the timeline. These are written to make
+# sense whatever the timeline's agents built.
 
 [[decoys]]
 id = "Q01"
 repo = "storefront"
 engineer = "@sam"
-prompt = "Fix the typo 'Chekout' in the checkout page heading."
-allowed_files = ['src/pages/checkout.tsx']
+prompt = "Add a short 'Development' section to README.md saying how to install dependencies and start the dev server."
+allowed_files = ['README.md']
 
 [[decoys]]
 id = "Q02"
 repo = "ledger-api"
 engineer = "@alex"
-prompt = "Add a unit test for adding two Money values in the same currency."
-allowed_files = ['tests/']
+prompt = "Add an .editorconfig at the repo root: UTF-8, LF line endings, 4-space indentation for Python, 2 for YAML."
+allowed_files = ['.editorconfig']
 
 [[decoys]]
 id = "Q03"
 repo = "ledger-worker"
 engineer = "@jo"
-prompt = "Rename the variable `tmp` in src/ledger_worker/jobs.py to something descriptive."
-allowed_files = ['src/ledger_worker/jobs.py']
+prompt = "Add a module docstring to src/ledger_worker/scheduler.py explaining in two sentences what the scheduler does."
+allowed_files = ['src/ledger_worker/scheduler.py']

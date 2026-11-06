@@ -273,6 +273,38 @@ MIGRATIONS: list[str] = [
         value   INTEGER NOT NULL
     );
     """,
+    # 2: supersession and a general graph (research R2, BD-43 to BD-46).
+    # A draft can name the decision it replaces; a version records when it
+    # stopped being in force; links join any two records (a decision and the
+    # explored record that informed it) and say who or what derived them.
+    """
+    ALTER TABLE draft ADD COLUMN supersedes TEXT;
+    ALTER TABLE decision_version ADD COLUMN valid_to TEXT;
+
+    CREATE TABLE link_v2 (
+        from_id     TEXT NOT NULL,
+        type        TEXT NOT NULL CHECK (type IN ('depends-on', 'supersedes', 'conflicts-with', 'informed-by')),
+        to_id       TEXT NOT NULL,
+        derived_by  TEXT NOT NULL DEFAULT 'engineer' CHECK (derived_by IN ('engineer', 'agent', 'judge', 'rule')),
+        confidence  REAL,
+        source      TEXT NOT NULL DEFAULT '',             -- the proposal that created it
+        recorded_at TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (from_id, type, to_id)
+    );
+    INSERT INTO link_v2 (from_id, type, to_id, derived_by, source)
+        SELECT from_id, type, to_id, 'engineer', 'migration 2' FROM link;
+    DROP TABLE link;
+    ALTER TABLE link_v2 RENAME TO link;
+
+    UPDATE decision_version SET valid_to = (
+        SELECT MIN(nv.valid_from) FROM link l
+        JOIN decision n ON n.id = l.from_id
+        JOIN decision_version nv ON nv.decision_id = n.id AND nv.version = n.current_version
+        WHERE l.type = 'supersedes' AND l.to_id = decision_version.decision_id
+    )
+    WHERE version = (SELECT current_version FROM decision WHERE id = decision_version.decision_id)
+      AND (SELECT status FROM decision WHERE id = decision_version.decision_id) = 'superseded';
+    """,
 ]
 
 

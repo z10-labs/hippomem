@@ -34,6 +34,7 @@ class Draft:
     backed_by: str | None
     outcome: str | None
     created_at: str
+    supersedes: str | None = None  # the decision in force this draft replaces, if the agent said so
 
 
 @dataclass(frozen=True)
@@ -105,9 +106,11 @@ def add(
     paths: tuple[str, ...] = (),
     replaces: int | None = None,
     replaced_because: str = "",
+    supersedes: str | None = None,
 ) -> int:
     """Record a draft. `replaces` drops an earlier draft on the same branch in
-    favour of this one; `replaced_because` says why it was dropped."""
+    favour of this one; `replaced_because` says why it was dropped.
+    `supersedes` names an accepted decision this draft would replace."""
     if kind not in ("decided", "considering"):
         raise ValueError("draft kind must be 'decided' or 'considering'")
     if scope not in ("code", "system", "team"):
@@ -116,6 +119,10 @@ def add(
         raise ValueError("a draft needs a title")
     if system_id and not systems.system_exists(conn, system_id):
         raise ValueError(f"unknown system {system_id!r}")
+    if supersedes:
+        row = conn.execute("SELECT status FROM decision WHERE id = ?", (supersedes,)).fetchone()
+        if row is None or row[0] != "accepted":
+            raise ValueError(f"supersedes must name a decision in force, not {supersedes!r}")
     with db.transaction(conn):
         if replaces is not None:
             _check_on_branch(conn, replaces, branch_id)
@@ -123,8 +130,8 @@ def add(
         vec = embedding.normalized(f"{title}. {statement} {why}")
         cur = conn.execute(
             """INSERT INTO draft (branch_id, kind, title, statement, why, scope, system_id, paths, engineer, agent, session_id,
-                   status, created_at, updated_at, embedding)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?) RETURNING id""",
+                   status, created_at, updated_at, embedding, supersedes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?) RETURNING id""",
             (
                 branch_id,
                 kind,
@@ -140,6 +147,7 @@ def add(
                 now,
                 now,
                 embedding.to_blob(vec),
+                supersedes or None,
             ),
         )
         draft_id = int(cur.fetchone()[0])
@@ -223,4 +231,5 @@ def _from_row(row: sqlite3.Row) -> Draft:
         backed_by=row["backed_by"],
         outcome=row["outcome"],
         created_at=row["created_at"],
+        supersedes=row["supersedes"],
     )

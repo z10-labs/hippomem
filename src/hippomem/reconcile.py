@@ -19,11 +19,14 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 
-from hippomem import db, drafts, explored, judge, proposals, systems
+from hippomem import db, decisions, drafts, explored, judge, proposals, search, systems
 from hippomem.policy import Policy
 
 MAX_DIFF_CHARS = 60_000
 MAX_HISTORY_CHARS = 30_000
+MAX_IN_FORCE_CANDIDATES = 12
+MAX_UNDRAFTED = 2
+NO_REASON = ("", "not recorded", "unknown", "none", "n/a")
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,7 @@ def _draft_json(d: drafts.Draft) -> dict:
         "replaced_by": d.replaced_by,
         "paths": list(d.paths),
         "backed_by_commit": d.backed_by,
+        "supersedes": d.supersedes,
     }
 
 
@@ -67,6 +71,12 @@ Branch: {branch}
 
 Drafts:
 {drafts}
+
+Team- or system-wide drafts (they go to an owner whatever you say; only tell us what they replace or repeat):
+{scope_drafts}
+
+Decisions already in force that these drafts may change, replace or repeat:
+{in_force}
 
 Commit history of the branch, oldest first (may be truncated). Use it to spot options that were built and then
 reversed even if nobody drafted them:
@@ -80,16 +90,29 @@ Give exactly one verdict per draft id:
   "why" (the reason, from the draft), "weight" ("heavy" for architecture, data model, security or cross-service
   choices, else "standard"), "files" (repo paths or globs the decision governs), and "alternatives": options the
   commit history shows were tried and reversed for this decision, as [{{"option": ..., "reason": ...}}] (empty if none).
+  Also "replaces": the id of a decision in force that this changes, reverses or makes untrue (it will leave force
+  when this is accepted), or null; and "repeats": the id of a decision in force that this only says again, without
+  changing it, or null. A draft's own "supersedes" field is the agent saying what it replaces; trust it unless the
+  diff clearly contradicts it.
 - "alternative": a dropped option that lost to a built draft. Include "of" (the built draft id) and "reason" (why it lost).
 - "explored": a dropped dead end with a lasting lesson that is not just an alternative of a built draft. Include "tried",
   "outcome", "why", and "revisit_if" (what would make it worth trying again).
 - "discard": noise, renaming, trivia, or not built.
 
-Then list "undrafted": real engineering decisions the history and diff show were made but no draft covers (an approach
-chosen, often after reversing another). Leave out trivia. Each: "title", "statement", "why" (from commit messages and
-code; say "not recorded" rather than invent), "weight", "files", "alternatives" as above.
+For each team- or system-wide draft, give {{"id": ..., "replaces": <id or null>, "repeats": <id or null>}} in "scope".
 
-Reply with only JSON: {{"drafts": [{{"id": 1, "verdict": "built", ...}}, ...], "undrafted": [...]}}
+Then list "undrafted": at most {max_undrafted} decisions the history shows were made but that no draft (open or dropped)
+and no decision in force already covers. Only include one if all of these hold:
+- it is a choice between options another engineer could have made differently (an approach, a library, a data model,
+  where logic lives), not an implementation detail (an endpoint added, a function signature, a hash or file format,
+  error handling, file layout, tests);
+- the commit messages or code comments state the reason, in words you can quote; if the reason isn't written down,
+  leave the decision out;
+- someone changing this code months from now would need to know it.
+Most merges have none: an empty list is the normal answer. Each: "title", "statement", "why", "weight", "files",
+"alternatives" as above, and "replaces" as above.
+
+Reply with only JSON: {{"drafts": [{{"id": 1, "verdict": "built", ...}}, ...], "scope": [...], "undrafted": [...]}}
 """
 
 CLOSE_PROMPT = """A branch was closed without merging. Sort its draft trail: keep only dead ends that taught something lasting.
@@ -133,30 +156,36 @@ def merge(
     scope_drafts = [d for d in trail if d.scope != "code" and d.status == "open"]
     code_trail = [d for d in trail if d not in scope_drafts]
     notes: list[str] = []
-    created: list[str] = [_scope_proposal(conn, policy, branch, d) for d in scope_drafts]
     if scope_drafts:
         notes.append(f"{len(scope_drafts)} module/service/team-wide drafts sent for an owner to confirm")
 
     verdicts: dict[int, dict] = {}
+    scope_verdicts: dict[int, dict] = {}
     undrafted: list[dict] = []
     error = ""
-    if code_trail or (history and not keep_branch_open):
+    candidates = in_force_candidates(conn, branch.repo, trail)
+    if code_trail or scope_drafts or (history and not keep_branch_open):
         try:
             reply = judge.run(
                 MERGE_PROMPT.format(
                     repo=branch.repo,
                     branch=branch.name,
                     drafts=json.dumps([_draft_json(d) for d in code_trail], indent=1) if code_trail else "(none)",
+                    scope_drafts=json.dumps([_draft_json(d) for d in scope_drafts], indent=1) if scope_drafts else "(none)",
+                    in_force="\n".join(_candidate_line(d) for d in candidates) or "(none)",
                     history=history[:MAX_HISTORY_CHARS] or "(not available)",
                     diff=diff[:MAX_DIFF_CHARS],
+                    max_undrafted=MAX_UNDRAFTED,
                 )
             )
             verdicts = {int(v["id"]): v for v in reply.get("drafts", []) if "id" in v}
-            undrafted = [u for u in reply.get("undrafted", []) if isinstance(u, dict) and str(u.get("title", "")).strip()]
+            scope_verdicts = {int(v["id"]): v for v in reply.get("scope", []) if isinstance(v, dict) and "id" in v}
+            undrafted = [u for u in reply.get("undrafted", []) if _worth_proposing(u)][:MAX_UNDRAFTED]
         except (judge.JudgeError, KeyError, ValueError, TypeError) as err:
             error = str(err)
             log_event(conn, "judge_failed", branch.repo, branch.name, stage="merge", error=error)
 
+    created = [_scope_proposal(conn, policy, branch, d, scope_verdicts.get(d.id, {})) for d in scope_drafts]
     outcome = _apply_merge(conn, policy, branch, code_trail, verdicts, commits)
     found = [_undrafted_proposal(conn, policy, branch, u, commits, merged_by) for u in undrafted]
     if found:
@@ -176,6 +205,55 @@ def merge(
         error=error,
         notes=tuple(notes),
     )
+
+
+def in_force_candidates(conn: sqlite3.Connection, repo: str, trail: list[drafts.Draft]) -> list[decisions.Decision]:
+    """Decisions in force that a branch's drafts might replace or repeat: those
+    the drafts name, then the closest matches to each draft's text."""
+    found: dict[str, decisions.Decision] = {}
+    for d in trail:
+        if d.supersedes and decisions.exists(conn, d.supersedes):
+            found.setdefault(d.supersedes, decisions.get(conn, d.supersedes))
+    for d in trail:
+        if d.status != "open":
+            continue
+        hits = search.query(conn, f"{d.title}. {d.statement} {d.why}", repo=repo, top_n=3).decisions
+        for h in hits:
+            if h.via == "direct" and h.decision.status == "accepted":
+                found.setdefault(h.decision.id, h.decision)
+    return list(found.values())[:MAX_IN_FORCE_CANDIDATES]
+
+
+def _candidate_line(d: decisions.Decision) -> str:
+    return f"{d.id}: {d.title}. {d.statement if d.statement != d.title else ''} Why: {d.why}".replace("  ", " ")
+
+
+def _worth_proposing(u: object) -> bool:
+    """An undrafted decision is only proposed with a title and a reason that was written down."""
+    if not isinstance(u, dict) or not str(u.get("title", "")).strip():
+        return False
+    return str(u.get("why", "")).strip().lower().rstrip(".") not in NO_REASON
+
+
+def _in_force(conn: sqlite3.Connection, decision_id: object) -> str | None:
+    """`decision_id` if it names a decision currently in force, else None."""
+    if not isinstance(decision_id, str) or not decision_id.strip():
+        return None
+    row = conn.execute("SELECT status FROM decision WHERE id = ?", (decision_id.strip(),)).fetchone()
+    return decision_id.strip() if row and row[0] == "accepted" else None
+
+
+def _create(conn: sqlite3.Connection, policy: Policy, payload: dict, verdict: dict, fallback_supersedes: str | None = None, **fields: object) -> str:
+    """Create the proposal a verdict calls for: more evidence for a decision it
+    only repeats, a supersession of one it replaces, or a new decision."""
+    repeats = _in_force(conn, verdict.get("repeats"))
+    if repeats:
+        evidence = {"evidence": payload.get("evidence", []), "anchors": payload.get("anchors", []), "implemented": payload.get("implemented", False)}
+        fields.pop("weight", None)
+        return proposals.create(conn, policy, kind="evidence", target=repeats, payload=evidence, **fields).id  # type: ignore[arg-type]
+    replaces = _in_force(conn, verdict.get("replaces")) or _in_force(conn, fallback_supersedes)
+    kind = "supersede" if replaces else "new"
+    return proposals.create(conn, policy, kind=kind, target=replaces, payload=payload, **fields).id  # type: ignore[arg-type]
 
 
 def _fallback_verdict(d: drafts.Draft, trail_by_id: dict[int, drafts.Draft]) -> dict:
@@ -198,7 +276,9 @@ def _apply_merge(
         v = resolved[d.id]
         if v.get("verdict") == "alternative":
             winner = int(v.get("of") or d.replaced_by or 0)
-            if winner in by_id and resolved[winner].get("verdict") == "built":
+            if winner in by_id and by_id[winner].title.strip().lower() == d.title.strip().lower():
+                resolved[d.id] = {"verdict": "discard"}  # restated, not reversed
+            elif winner in by_id and resolved[winner].get("verdict") == "built":
                 alternatives_of.setdefault(winner, []).append(
                     {"option": d.title, "reason": v.get("reason") or d.dropped_reason or "dropped during work"}
                 )
@@ -206,6 +286,8 @@ def _apply_merge(
                 resolved[d.id] = {"verdict": "discard"}
     for d in trail:
         if d.status == "dropped" and d.replaced_by in by_id and resolved[d.id].get("verdict") == "discard":
+            if by_id[d.replaced_by].title.strip().lower() == d.title.strip().lower():
+                continue
             if resolved[d.replaced_by].get("verdict") == "built":
                 resolved[d.id] = {"verdict": "alternative", "of": d.replaced_by, "reason": d.dropped_reason}
                 alternatives_of.setdefault(d.replaced_by, []).append({"option": d.title, "reason": d.dropped_reason})
@@ -269,18 +351,9 @@ def _undrafted_proposal(conn: sqlite3.Connection, policy: Policy, branch: drafts
         + [{"kind": "branch", "ref": f"{branch.repo}:{branch.name}", "note": "inferred from history, not drafted"}],
     }
     weight = str(u["weight"]) if u.get("weight") in ("standard", "heavy") else "standard"
-    p = proposals.create(
-        conn,
-        policy,
-        kind="new",
-        payload=payload,
-        source="reconciliation",
-        proposed_by=merged_by or "unknown",
-        proposed_via="git",
-        weight=weight,
-        branch_id=branch.id,
+    return _create(
+        conn, policy, payload, u, source="reconciliation", proposed_by=merged_by or "unknown", proposed_via="git", weight=weight, branch_id=branch.id
     )
-    return p.id
 
 
 def _systems_for_draft(conn: sqlite3.Connection, branch: drafts.Branch, d: drafts.Draft, files: list[str]) -> list[str]:
@@ -310,11 +383,12 @@ def _built_proposal(
         + [{"kind": "branch", "ref": f"{branch.repo}:{branch.name}", "note": f"draft #{d.id}"}],
         "drafts": [d.id],
     }
-    p = proposals.create(
+    return _create(
         conn,
         policy,
-        kind="new",
-        payload=payload,
+        payload,
+        v,
+        fallback_supersedes=d.supersedes,
         source="reconciliation",
         proposed_by=d.engineer,
         proposed_via=d.agent,
@@ -322,10 +396,9 @@ def _built_proposal(
         session_id=d.session_id,
         branch_id=branch.id,
     )
-    return p.id
 
 
-def _scope_proposal(conn: sqlite3.Connection, policy: Policy, branch: drafts.Branch, d: drafts.Draft) -> str:
+def _scope_proposal(conn: sqlite3.Connection, policy: Policy, branch: drafts.Branch, d: drafts.Draft, verdict: dict) -> str:
     payload = {
         "title": d.title,
         "statement": d.statement or d.title,
@@ -335,19 +408,20 @@ def _scope_proposal(conn: sqlite3.Connection, policy: Policy, branch: drafts.Bra
         "evidence": [{"kind": "branch", "ref": f"{branch.repo}:{branch.name}", "note": f"draft #{d.id}"}],
         "drafts": [d.id],
     }
-    p = proposals.create(
+    pid = _create(
         conn,
         policy,
-        kind="new",
-        payload=payload,
+        payload,
+        {"replaces": verdict.get("replaces")},  # a team-wide rule is never folded into another as evidence
+        fallback_supersedes=d.supersedes,
         source="scope",
         proposed_by=d.engineer,
         proposed_via=d.agent,
         session_id=d.session_id,
         branch_id=branch.id,
     )
-    drafts.set_outcome(conn, d.id, "proposed", p.id)
-    return p.id
+    drafts.set_outcome(conn, d.id, "proposed", pid)
+    return pid
 
 
 def _explored(conn: sqlite3.Connection, branch: drafts.Branch, d: drafts.Draft, v: dict) -> str:

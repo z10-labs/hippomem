@@ -82,6 +82,31 @@ def cmd_coldread(args: argparse.Namespace, book: ledger.Ledger) -> None:
             print(f"cold read {arm} #{rep}: {len(rec['answers'])} answers, ${rec['cost_usd']:.2f} {rec.get('error', '')}")
 
 
+def cmd_regrade(args: argparse.Namespace, book: ledger.Ledger) -> None:
+    """Grade every reviewed proposal again with the current grader, into review.regraded.jsonl (decisions unchanged)."""
+    timeline = world.load("timeline.toml")
+    box = timeline_box(args, book, "regrade")
+    entries = metrics.jsonl(box.root / "e1" / "review.jsonl")
+    graded = [e for e in entries if e.get("grade") and "proposal" in e]
+    book.check(len(graded) * ESTIMATE_GRADE, allow_past_ask=args.approved)
+    g = make_grader(box)
+    out = box.root / "e1" / "review.regraded.jsonl"
+    out.unlink(missing_ok=True)
+    regraded: dict[tuple[str, int], dict] = {}
+    for e in entries:
+        if e.get("grade") and "proposal" in e:
+            key = (e["proposal"], e["week"])
+            if key not in regraded:
+                row = box.rows("SELECT * FROM proposal WHERE id = ?", e["proposal"])[0]
+                regraded[key] = grader.match_proposal(
+                    g, simulate.proposal_text(row), simulate.known_records(timeline, e["week"]), f"regrade-{e['proposal']}"
+                )
+            e = {**e, "grade": regraded[key], "grade_r1": e["grade"]}
+        with out.open("a") as f:
+            f.write(json.dumps(e) + "\n")
+    print(f"regraded {len(regraded)} proposals into {out}")
+
+
 def cmd_report(args: argparse.Namespace, book: ledger.Ledger) -> None:
     timeline = world.load("timeline.toml")
     pdefs = world.load("probes.toml")
@@ -109,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--phase", default="R1")
     parser.add_argument("--approved", action="store_true", help="the owner approved spending past the ask point")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("build", "timeline", "probes", "decoys", "coldread", "report"):
+    for name in ("build", "timeline", "probes", "decoys", "coldread", "report", "regrade"):
         p = sub.add_parser(name)
         p.add_argument("--sandbox", required=True)
         if name == "timeline":
@@ -140,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
         "decoys": lambda a, b: cmd_probes(a, b, decoy=True),
         "coldread": cmd_coldread,
         "report": cmd_report,
+        "regrade": cmd_regrade,
     }
     try:
         commands[args.command](args, book)

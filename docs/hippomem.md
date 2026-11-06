@@ -232,6 +232,8 @@ Retrieval keeps what the proof of concept got right: similarity search with a re
 We prove the concept on our own machines first. The end goal is a remote memory the whole team's agents share; deployment comes after the proof.
 
 > **Status (2026-10-28):** phases 1–4 are built (PRs 15, 16, 17) and checked end to end by the scenario harness in `scenarios/` with real headless agents (PR 18; results in [scenario-results.md](scenario-results.md)). Phase 5, the pilot on real repos, is next and needs the owner. Build choices are in [build-decisions.md](build-decisions.md); the design as built is in [architecture.md](architecture.md).
+>
+> **Status (2026-11-06):** a controlled research programme is under way before the pilot ([research-plan.md](research-plan.md)). The baseline ([research/r1-baseline.md](research/r1-baseline.md)) found that supersessions were never recorded, inferred proposals were mostly noise, a sole owner's team-wide proposal could never be accepted, and ask-the-author missed settled code; fixes are BD-43 to BD-49.
 
 **1. Reframe.** This document. Rename the package, CLI and README from Hippocampus to Hippomem.
 

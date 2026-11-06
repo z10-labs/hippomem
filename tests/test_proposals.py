@@ -77,6 +77,20 @@ def test_scope_wide_decision_in_unowned_system_falls_back_to_any_engineer(conn):
     assert proposals.accept(conn, POLICY, p.id, SAM)
 
 
+def test_a_sole_owners_scope_wide_proposal_can_be_accepted_by_any_other_engineer(conn):
+    p = propose(conn, new_payload("Billing owns all money writes", scope="system"), by="@alex")  # @alex is billing's only owner
+    with pytest.raises(proposals.Refused, match="their own"):
+        proposals.accept(conn, POLICY, p.id, ALEX)
+    assert proposals.accept(conn, POLICY, p.id, SAM)
+
+
+def test_with_another_owner_a_scope_wide_proposal_still_needs_an_owner(conn):
+    conn.execute("INSERT INTO system_owner (system_id, actor_id) VALUES (?, ?)", ("billing", "@kim"))
+    p = propose(conn, new_payload("Billing owns all money writes", scope="system"), by="@alex")
+    with pytest.raises(proposals.Refused, match="owner of billing"):
+        proposals.accept(conn, POLICY, p.id, SAM)
+
+
 def test_supersede_links_and_demotes_the_old_decision(conn):
     old = accepted_decision(conn, "Use Redis for rate limiting")
     p = propose(conn, new_payload(), kind="supersede", target=old)

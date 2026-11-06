@@ -28,12 +28,20 @@ def rate(n: int, d: int) -> str:
 # --- E1, E2, E6: the timeline ----------------------------------------------------------
 
 
+def review_log(box: Sandbox) -> list[dict]:
+    """The weekly review log, with regraded entries (`review.regraded.jsonl`) when they exist."""
+    regraded = box.root / "e1" / "review.regraded.jsonl"
+    return jsonl(regraded if regraded.exists() else box.root / "e1" / "review.jsonl")
+
+
 def capture(box: Sandbox, timeline: dict) -> dict:
-    review = jsonl(box.root / "e1" / "review.jsonl")
+    review = review_log(box)
+    rescued = {s["step"] for s in jsonl(box.root / "e1" / "steps.jsonl") if s.get("rescued")}
+    rescued_records = {oid for step in timeline["steps"] if step["id"] in rescued for oid in step["expects"]}
     graded = [r for r in review if r.get("grade") and "proposal" in r]
     decided = [r for r in graded if r.get("decision") in ("accept", "accepted", "reject", "rejected")]
     matched: dict[str, str] = json.loads((box.root / "e1" / "matched.json").read_text()) if (box.root / "e1" / "matched.json").exists() else {}
-    oracle = {d["id"]: d for d in timeline["decisions"]}
+    oracle = {d["id"]: d for d in timeline["decisions"] if not d.get("excluded")}
 
     # before review: what the agents and the judge proposed
     pre = {
@@ -41,8 +49,9 @@ def capture(box: Sandbox, timeline: dict) -> dict:
         "matched_a_record": sum(1 for r in graded if r["grade"].get("match")),
         "statement_correct": sum(1 for r in graded if r["grade"].get("statement_correct")),
         "why": dict(Counter(str(r["grade"].get("why")) for r in graded)),
-        "invented_claims": sum(len(r["grade"].get("invented") or []) for r in graded),
-        "proposals_with_invented_claims": sum(1 for r in graded if r["grade"].get("invented")),
+        "contradicting_claims": sum(len(_contradicts(r["grade"])) for r in graded),
+        "proposals_contradicting_the_key": sum(1 for r in graded if _contradicts(r["grade"])),
+        "proposals_as_supersessions": sum(1 for r in graded if r.get("kind") == "supersede"),
         "unmatched": [r["proposal"] for r in graded if not r["grade"].get("match")],
         "by_source": dict(Counter(("inferred" if r.get("inferred") else r.get("source", "?")) for r in graded)),
     }
@@ -58,7 +67,8 @@ def capture(box: Sandbox, timeline: dict) -> dict:
     accepted = [
         r for r in decided if r.get("decision") in ("accept", "accepted") and str(r.get("outcome", "")).startswith(("Accepted", "by reviewer"))
     ]
-    wrong_in = [r["proposal"] for r in accepted if not (r["grade"].get("match") and r["grade"].get("statement_correct"))]
+    not_in_key = [r["proposal"] for r in accepted if not (r["grade"].get("match") and r["grade"].get("statement_correct"))]
+    contradicting = [r["proposal"] for r in accepted if _contradicts(r["grade"])]
     reviewer_accepts = [r for r in accepted if r.get("outcome") == "by reviewer agent"]
     recall = {
         "heavy": rate(
@@ -69,7 +79,11 @@ def capture(box: Sandbox, timeline: dict) -> dict:
             sum(1 for d in oracle.values() if d["weight"] == "standard"),
         ),
         "all": rate(sum(1 for i in oracle if i in matched), len(oracle)),
+        "all, leaving out steps the engineer had to unblock": rate(
+            sum(1 for i in oracle if i in matched and i not in rescued_records), sum(1 for i in oracle if i not in rescued_records)
+        ),
         "missing": sorted(i for i in oracle if i not in matched),
+        "rescued_steps": sorted(rescued),
     }
     memory_driven = {}
     for step in timeline["steps"]:
@@ -86,9 +100,10 @@ def capture(box: Sandbox, timeline: dict) -> dict:
         "alternatives_named": rate(alt_found, alt_total),
         "after_review": {
             "accepted": len(accepted),
-            "accepted_but_wrong": wrong_in,
+            "accepted_not_a_team_decision": not_in_key,
+            "accepted_contradicting_the_key": contradicting,
             "accepted_by_reviewer_agent": len(reviewer_accepts),
-            "reviewer_agent_wrong": [r["proposal"] for r in reviewer_accepts if r["proposal"] in wrong_in],
+            "reviewer_agent_accepted_not_in_key": [r["proposal"] for r in reviewer_accepts if r["proposal"] in not_in_key],
             "recall": recall,
         },
         "memory_driven_steps": memory_driven,
@@ -99,6 +114,12 @@ def capture(box: Sandbox, timeline: dict) -> dict:
             "unmatched_records": [x["explored"] for x in explored if not x.get("grade", {}).get("match")],
         },
     }
+
+
+def _contradicts(grade: dict) -> list:
+    """Claims contradicting the answer key. R1 grades predate the split and only have `invented`, which mixes
+    contradictions with extra detail; they are regraded rather than read from that field."""
+    return list(grade.get("contradicts") or [])
 
 
 def memory_id(box: Sandbox, matched: dict[str, str], oracle_id: str) -> str | None:
