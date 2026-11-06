@@ -190,3 +190,15 @@ def test_team_wide_rules_stay_in_the_digest_not_every_lookup(conn):
     s = start(conn)
     assert "Services never read each other's databases" in sessions.digest(conn, POLICY, ALEX_AGENT, s, 2)
     assert sessions.lookup(conn, POLICY, ALEX_AGENT, "s1", "product-api", "src/billing/refunds.py") == ""
+
+
+def test_settled_code_hint_says_to_hold_the_behaviour_change(conn, monkeypatch):
+    from hippomem import db
+
+    settled = {**HISTORY, "commits": 1, "last": {**HISTORY["last"], "date": "2025-06-10"}}
+    monkeypatch.setattr(db, "now", lambda: "2026-10-28T10:00:00Z")
+    start(conn)
+    text = sessions.lookup(conn, POLICY, ALEX_AGENT, "s1", "product-api", "src/payouts/rounding.py", settled)
+    assert "don't change how it behaves until" in text and "carry on with the rest" in text
+    active = sessions.lookup(conn, POLICY, ALEX_AGENT, "s1", "product-api", "src/billing/time.py", HISTORY)
+    assert "You don't have to wait" in active

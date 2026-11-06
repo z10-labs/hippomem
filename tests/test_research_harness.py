@@ -137,3 +137,9 @@ def test_sandbox_state_survives_reloading(tmp_path):
     box.save()
     again = Sandbox.load(box.root, book)
     assert (again.port, again.now, again.tokens, again.engineers["@jo"].email) == (50123, "2026-02-11T16:00:00Z", {"@jo": "hm_x"}, "jo@meridian.test")
+
+
+def test_the_simulated_engineer_rejects_a_supersession_of_something_still_true():
+    assert not simulate.is_good({"match": "M19", "statement_correct": True, "why": "correct", "replaces_correct": False})
+    assert simulate.is_good({"match": "M19", "statement_correct": True, "why": "correct", "replaces_correct": True})
+    assert simulate.is_good({"match": "M01", "statement_correct": True, "why": "correct", "replaces_correct": None})

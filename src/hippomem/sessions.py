@@ -244,7 +244,15 @@ def lookup(conn: sqlite3.Connection, policy: Policy, actor: Actor, session_id: s
             + (f"; last change {last.get('date')} '{last.get('subject')}'" if last else "")
             + ". Before you change how it works (not just add to it), call"
             f' hippomem_ask_author(repo="{repo}", path="{path}", question=...) so the reason behind the current design'
-            " gets recorded. You don't have to wait for the answer; mention the open question in your summary."
+            " gets recorded. "
+            + (
+                # Settled code: its reason is the kind nobody else knows (BD-50, the owner's call after R3).
+                f"This code has been settled since {last.get('date', 'long ago')}: don't change how it behaves until {author}"
+                " answers. Ask now, leave that change out, carry on with the rest of the task, and say in your summary"
+                " that it's waiting on their answer. Adding to it without changing what it does is fine."
+                if _settled(history)
+                else "You don't have to wait for the answer; mention the open question in your summary."
+            )
         )
         conn.execute(
             "INSERT INTO usage (actor, agent, action, repo, detail, at) VALUES (?, ?, 'ask_author_hint', ?, ?, ?)",
