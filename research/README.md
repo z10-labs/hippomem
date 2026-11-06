@@ -51,3 +51,13 @@ Timeliness joins the last two: a decision counts as timely if a usage row showin
 ## Grading
 
 Code scores whatever it can: diffs against regexes, ids, statuses. The grader ([grader.py](grader.py), Opus, no tools) is used for reasons, explanations and inconclusive probe endings. One in five grades is checked by hand and logged.
+
+## Real history: the open-source replay (R4)
+
+[oss/replay.py](oss/replay.py) walks every merge of `alphagov/govuk-aws` from 1 July to 15 September 2017, oldest first, through Hippomem's real merge reconciliation and judge, with the ADR files (`docs/architecture/decisions/`) cut out of every diff and history. The ADRs, as written, are the answer key. No agents and no drafts: it measures what the memory recovers from merges alone.
+
+```bash
+python -m research.oss.replay adrs   --repo ~/.hippomem-research/r4/govuk-aws --out ~/.hippomem-research/r4/run
+python -m research.oss.replay replay --repo ~/.hippomem-research/r4/govuk-aws --out ~/.hippomem-research/r4/run
+python -m research.oss.replay grade  --repo ~/.hippomem-research/r4/govuk-aws --out ~/.hippomem-research/r4/run
+```

@@ -143,3 +143,19 @@ def test_the_simulated_engineer_rejects_a_supersession_of_something_still_true()
     assert not simulate.is_good({"match": "M19", "statement_correct": True, "why": "correct", "replaces_correct": False})
     assert simulate.is_good({"match": "M19", "statement_correct": True, "why": "correct", "replaces_correct": True})
     assert simulate.is_good({"match": "M01", "statement_correct": True, "why": "correct", "replaces_correct": None})
+
+
+def test_adr_answer_key_is_read_as_written(tmp_path):
+    from research.oss import replay
+
+    folder = tmp_path / replay.ADR_DIR
+    folder.mkdir(parents=True)
+    (folder / "0018-use-rds.md").write_text(
+        "# 18. Use RDS instead of provisioned EC2 databases\n\nDate: 2017-08-01\n\n## Status\n\nAccepted\n\n"
+        "## Context\n\nWe run Postgres on EC2.\n\n## Decision\n\nUse RDS.\n\n## Consequences\n\nLess to run.\n"
+    )
+    (folder / "README.md").write_text("not an ADR")
+    [adr] = replay.adrs(tmp_path)
+    assert (adr["id"], adr["date"], adr["status"]) == ("ADR-0018", "2017-08-01", "Accepted")
+    assert adr["title"] == "18. Use RDS instead of provisioned EC2 databases"
+    assert adr["why"].startswith("Use RDS. Context: We run Postgres on EC2.")

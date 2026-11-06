@@ -133,7 +133,7 @@ def memory_id(box: Sandbox, matched: dict[str, str], oracle_id: str) -> str | No
 def staleness(box: Sandbox) -> dict:
     """E2: did each supersession in the timeline reach the memory, as a supersession?"""
     matched: dict[str, str] = json.loads((box.root / "e1" / "matched.json").read_text()) if (box.root / "e1" / "matched.json").exists() else {}
-    out = {}
+    out: dict[str, object] = {}
     for old, new in SUPERSESSIONS:
         old_id, new_id = memory_id(box, matched, old), memory_id(box, matched, new)
         if not old_id or not new_id:
