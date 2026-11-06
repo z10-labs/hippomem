@@ -127,3 +127,37 @@ The R1 entry said team-wide rules suppressed the ask-the-author hint. Wrong: the
 - M24 marked `excluded` in the answer key (inconsistent with M04, found by Watchman). R1 recall with it excluded: 22/25 (88%); heavy 6/8, standard 16/17.
 
 Spend: $56.12.
+
+## 2026-11-06: R3 timeline, the fixed product on a fresh Meridian ($16.86)
+
+Same answer key, same steps, same review. R1 numbers use the regraded log.
+
+| | R1 | R3 |
+|---|---|---|
+| Proposals | 47 | **26** (1.0 per merge, was 2.0) |
+| Proposals matching an answer-key record | 47 of 56 grades | **26 of 26** |
+| …stating it correctly | 39 | **26** |
+| Inferred proposals | 22 | **0** |
+| Accepted | 25 of 47 (53%) | **23 of 26 (88%)** |
+| Recall, all (M24 excluded) | 22/25 (88%) | **23/25 (92%)**; 21/22 (95%) leaving out the 3 steps the engineer had to unblock |
+| Recall, heavy | 6/8 | **8/8** |
+| Supersessions recorded | 0 of 2 checkable | **3 of 3 checkable** (M03→M21, M07→M15, M18→M26) |
+| Decisions wrongly taken out of force | 0 | **1** (see below) |
+| Rejected options named | 17/25 | 21/27 |
+| Explored records | 3/3 | 3/3 |
+| Accepted claims contradicting the key | 0 | 1 (minor) |
+
+- **New failure: over-superseding.** When payouts went individual (M19), the judge marked the proposal as replacing D-0013, the payout idempotency keys from the incident (M16), because D-0013's wording mentioned *bulk* payouts. M16 is still true. Accepting M19 took it out of force. The grader checks that a proposal says the right thing, not that it replaces the right thing, so the simulated engineers accepted it. A supersession needs its target checked as carefully as its content. Fix candidate for R5: the judge says `replaces` only when the old decision's statement becomes false, and `amends` when it stays true but its wording is out of date; the reviewer is shown what will leave force.
+- **Misses:** M09 was proposed correctly, but Watchman rejected it on a technical objection (the batch loop had no throttle against the 5 requests/second limit): a judgement call, arguably right. M05: there is no OpenAPI spec to generate a client from; even after the engineer's go-ahead the agent rightly refused to invent one. Simulation limit.
+- **Contradiction:** P-0022 (balances) called the system "Postgres-only" in week 9, after M21 allowed Redis as a cache. A stale phrase inside an otherwise correct proposal; accepted.
+- **Ask the author fired once** (Alex's agent asked about Jo's scheduler); the engineer had no recorded reason, so it was dismissed.
+- Three steps needed the engineer's go-ahead (w2-api-client, w6-payout-incident, w12-fx-provider); two of those then produced their decision.
+
+## 2026-11-06: R3 probes, decoys and cold read; R3 closed
+
+- Probes: 27/30 conformed with the memory vs 21/30 without; violated 3/30 vs 9/30; timely 27/27; stale-fact failures 0/12 with memory, 1/12 without (P02, batching).
+- P06: the ask-the-author hint fired 3/3 and the agent asked Jo 3/3, then changed the rounding anyway (it's told not to wait, BD-35). Hints elsewhere in the 30 memory-arm runs: none.
+- Cold read: memory 87% (R1 78%), repos 76% (70%), both 89% (84%); wrong claims 0 in every arm.
+- Decoys: same files, turns within one, no memory calls, no stray edits.
+- The budget guard stopped the decoys once (estimate would pass $100); they were run one repetition at a time, actual $1.32.
+- Summary: [r3-remeasure.md](r3-remeasure.md). R3 $39.42; total $95.55.
