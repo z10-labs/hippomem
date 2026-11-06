@@ -161,3 +161,10 @@ Same answer key, same steps, same review. R1 numbers use the regraded log.
 - Decoys: same files, turns within one, no memory calls, no stray edits.
 - The budget guard stopped the decoys once (estimate would pass $100); they were run one repetition at a time, actual $1.32.
 - Summary: [r3-remeasure.md](r3-remeasure.md). R3 $39.42; total $95.55.
+
+## 2026-11-06: owner's answers; R5 fixes before R4
+
+- The owner approved spending past $100 (up to $150), and chose that agents wait on behaviour changes to settled code.
+- **Order changed:** R5's product fixes (BD-50: `amends` vs `replaces`; reviewers told what leaves force; hold changes to settled code) were built and merged (PR 23) *before* R4, so the real-history replay measures the latest product. R5 then confirms on Meridian.
+- The grader gained `replaces_correct` (does a supersession remove something the key says was replaced?) and `decision_worthy` (a real choice with a reason, vs an implementation detail). The simulated engineers now reject a supersession whose target is still true, as a careful reviewer reading the new warning would.
+- **R4 project:** `alphagov/govuk-aws` (MIT): 39 ADRs, 30 of them written June–September 2017 while the infrastructure was built. Criterion missed: only 2 ADRs are marked superseded (the plan asked for 3); teams rarely mark it, and no candidate checked had more. Window: the 267 merges from 1 July to 15 September 2017.
