@@ -72,7 +72,7 @@ Mappings can also be added later with `hippomem map add <repo> <glob> <system>`,
 | Evidence for an accepted decision | Anyone, or automatically (`evidence_only = "auto"`) |
 | New decision, standard weight | A reviewer agent or an engineer |
 | Heavy, superseding, or conflicting with another decision | An engineer |
-| Covering a module, service or team, or a repo mapping | An owner of one of its systems (any engineer if it has no owners) |
+| Covering a module, service or team, or a repo mapping | An owner of one of its systems (any engineer if it has no owners, or if the proposer is its only owner) |
 | Your own proposal | Nobody, unless `self_approval = "standard"` and it's standard weight |
 
 ## Engineers and their coding agents

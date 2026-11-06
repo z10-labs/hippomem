@@ -82,7 +82,10 @@ def refusal(
     if level == "scope" and actor.kind != "admin":
         owned = _systems_in(payload)
         owners = {o for s in owned for o in systems.owners_of(conn, s)}
-        if owners and actor.id not in owners:
+        # When the proposer is the only owner, no owner could ever accept it:
+        # any other engineer may (BD-49, the owner's call after research R1).
+        sole_owner_proposed = owners == {proposed_by}
+        if owners and actor.id not in owners and not sole_owner_proposed:
             return f"needs an owner of {', '.join(owned)} ({', '.join(sorted(owners))})"
     return None
 
