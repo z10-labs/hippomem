@@ -84,6 +84,7 @@ class Sandbox:
     server: subprocess.Popen | None = None
     runs: list[AgentRun] = field(default_factory=list)
     now: str = "2026-01-05T09:00:00Z"
+    approved: bool = False  # the owner approved spending past the ask point
 
     # --- layout ------------------------------------------------------------------
 
@@ -203,7 +204,7 @@ class Sandbox:
         if root.exists():
             shutil.rmtree(root)
         shutil.copytree(self.root, root, ignore=shutil.ignore_patterns("agent-config", "transcripts", "events.jsonl", "runs.jsonl", "server.log"))
-        copy = Sandbox(root=root, book=self.book, phase=phase or self.phase, experiment=experiment or self.experiment)
+        copy = Sandbox(root=root, book=self.book, phase=phase or self.phase, experiment=experiment or self.experiment, approved=self.approved)
         copy.engineers, copy.tokens = dict(self.engineers), dict(self.tokens)
         config = copy.home / "hippomem.toml"
         config.write_text(re.sub(r"(?m)^port = \d+$", f"port = {copy.port}", config.read_text(), count=1))
@@ -282,7 +283,7 @@ class Sandbox:
 
     def run_agent(self, engineer: str, cwd: Path, prompt: str, *, with_memory: bool = True, with_code: bool = True, label: str = "") -> AgentRun:
         """Run one headless Claude Code session as `engineer` in `cwd` and record its cost."""
-        self.book.check(RUN_BUDGET_USD, allow_past_ask=False)
+        self.book.check(RUN_BUDGET_USD, allow_past_ask=self.approved)
         run_id = f"{self.experiment or 'x'}-{len(self.runs) + 1:03d}" + (f"-{label}" if label else "")
         # Claude Code tells agents the real date; in a simulation that's wrong, and agents write it into records.
         day = datetime.strptime(self.now[:10], "%Y-%m-%d").strftime("%A %-d %B %Y")
