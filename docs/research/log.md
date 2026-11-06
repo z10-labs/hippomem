@@ -168,3 +168,13 @@ Same answer key, same steps, same review. R1 numbers use the regraded log.
 - **Order changed:** R5's product fixes (BD-50: `amends` vs `replaces`; reviewers told what leaves force; hold changes to settled code) were built and merged (PR 23) *before* R4, so the real-history replay measures the latest product. R5 then confirms on Meridian.
 - The grader gained `replaces_correct` (does a supersession remove something the key says was replaced?) and `decision_worthy` (a real choice with a reason, vs an implementation detail). The simulated engineers now reject a supersession whose target is still true, as a careful reviewer reading the new warning would.
 - **R4 project:** `alphagov/govuk-aws` (MIT): 39 ADRs, 30 of them written June–September 2017 while the infrastructure was built. Criterion missed: only 2 ADRs are marked superseded (the plan asked for 3); teams rarely mark it, and no candidate checked had more. Window: the 267 merges from 1 July to 15 September 2017.
+
+## 2026-11-06: R4 replay, R5 confirmation; research closed
+
+**R4, `alphagov/govuk-aws`, 267 merges, ADRs hidden ($25.79):** 96 proposals (0.36 per merge), no judge failures. 69 decision-worthy (72%). 42 matched an ADR, 38 stated it correctly; 18 of the 29 in-window ADRs recovered (62%). 30 decision-worthy proposals no ADR covers. Reasons right in 11 of 42, partial in 24. 6 contradicted an ADR. Supersession untested (nothing was accepted during the replay, so nothing was in force). Hand-check of 8 grades: 8 agree. Grading cost more than planned ($10.12, about $0.11 a proposal, because every call carries all 39 ADRs).
+
+**R5, Meridian on the product after BD-50 ($16.84 timeline, $5.52 probes and cold read):** recall 24/25 (heavy 8/8); supersessions 4/4 recorded, **0 wrongly taken out of force** (R3: 1); proposals 27, acceptance 93%; reasons correct in 24 of 26. One accepted proposal has a wrong detail about the past (why M07's counters were keyed by account id). P06: the agent made the edit, got the settled-code hint, reverted, asked Jo and reported it as waiting, 3/3. Stale-fact probes P01, P02, P08: 6/6 conformed, timely. Cold read: memory 88%, both 91%, 0 wrong claims; held-out 73% vs visible 95%.
+
+**Harness incidents:** the R5 timeline was stopped and restarted once (the owner's approval past $100 wasn't passed into sandboxes; no spend lost). A zsh command stored in a variable didn't run (no spend). Both fixed.
+
+Final report: [findings.md](findings.md). Total $142.36 of $150.
