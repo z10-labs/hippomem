@@ -31,7 +31,9 @@ ESTIMATE_GRADE = 0.08
 
 
 def timeline_box(args: argparse.Namespace, book: ledger.Ledger, experiment: str) -> Sandbox:
-    return Sandbox.load(Path(args.sandbox).expanduser() / "meridian", book, phase=args.phase, experiment=experiment)
+    box = Sandbox.load(Path(args.sandbox).expanduser() / "meridian", book, phase=args.phase, experiment=experiment)
+    box.approved = args.approved
+    return box
 
 
 def make_grader(box: Sandbox) -> grader.Grader:
