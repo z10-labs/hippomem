@@ -152,3 +152,12 @@ Same answer key, same steps, same review. R1 numbers use the regraded log.
 - **Contradiction:** P-0022 (balances) called the system "Postgres-only" in week 9, after M21 allowed Redis as a cache. A stale phrase inside an otherwise correct proposal; accepted.
 - **Ask the author fired once** (Alex's agent asked about Jo's scheduler); the engineer had no recorded reason, so it was dismissed.
 - Three steps needed the engineer's go-ahead (w2-api-client, w6-payout-incident, w12-fx-provider); two of those then produced their decision.
+
+## 2026-11-06: R3 probes, decoys and cold read; R3 closed
+
+- Probes: 27/30 conformed with the memory vs 21/30 without; violated 3/30 vs 9/30; timely 27/27; stale-fact failures 0/12 with memory, 1/12 without (P02, batching).
+- P06: the ask-the-author hint fired 3/3 and the agent asked Jo 3/3, then changed the rounding anyway (it's told not to wait, BD-35). Hints elsewhere in the 30 memory-arm runs: none.
+- Cold read: memory 87% (R1 78%), repos 76% (70%), both 89% (84%); wrong claims 0 in every arm.
+- Decoys: same files, turns within one, no memory calls, no stray edits.
+- The budget guard stopped the decoys once (estimate would pass $100); they were run one repetition at a time, actual $1.32.
+- Summary: [r3-remeasure.md](r3-remeasure.md). R3 $39.42; total $95.55.
