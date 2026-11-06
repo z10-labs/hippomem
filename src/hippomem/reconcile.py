@@ -90,10 +90,14 @@ Give exactly one verdict per draft id:
   "why" (the reason, from the draft), "weight" ("heavy" for architecture, data model, security or cross-service
   choices, else "standard"), "files" (repo paths or globs the decision governs), and "alternatives": options the
   commit history shows were tried and reversed for this decision, as [{{"option": ..., "reason": ...}}] (empty if none).
-  Also "replaces": the id of a decision in force that this changes, reverses or makes untrue (it will leave force
-  when this is accepted), or null; and "repeats": the id of a decision in force that this only says again, without
-  changing it, or null. A draft's own "supersedes" field is the agent saying what it replaces; trust it unless the
-  diff clearly contradicts it.
+  Also, against the decisions in force listed above:
+  "replaces": the id of a decision whose statement is no longer true once this is built (it will leave force when
+  this is accepted), or null. Only when the old decision as a whole stops being true: a decision that stays true
+  but now reads slightly out of date is "amends", not "replaces".
+  "amends": the id of a decision that stays in force but that this builds on or adjusts, or null.
+  "repeats": the id of a decision this only says again, without changing it, or null.
+  A draft's own "supersedes" field is the agent saying what it replaces; trust it unless the old decision clearly
+  stays true.
 - "alternative": a dropped option that lost to a built draft. Include "of" (the built draft id) and "reason" (why it lost).
 - "explored": a dropped dead end with a lasting lesson that is not just an alternative of a built draft. Include "tried",
   "outcome", "why", and "revisit_if" (what would make it worth trying again).
@@ -245,13 +249,18 @@ def _in_force(conn: sqlite3.Connection, decision_id: object) -> str | None:
 
 def _create(conn: sqlite3.Connection, policy: Policy, payload: dict, verdict: dict, fallback_supersedes: str | None = None, **fields: object) -> str:
     """Create the proposal a verdict calls for: more evidence for a decision it
-    only repeats, a supersession of one it replaces, or a new decision."""
+    only repeats, a supersession of one it replaces, or a new decision (linked
+    to any decision it amends, which stays in force)."""
     repeats = _in_force(conn, verdict.get("repeats"))
     if repeats:
         evidence = {"evidence": payload.get("evidence", []), "anchors": payload.get("anchors", []), "implemented": payload.get("implemented", False)}
         fields.pop("weight", None)
         return proposals.create(conn, policy, kind="evidence", target=repeats, payload=evidence, **fields).id  # type: ignore[arg-type]
     replaces = _in_force(conn, verdict.get("replaces")) or _in_force(conn, fallback_supersedes)
+    amends = _in_force(conn, verdict.get("amends"))
+    if amends and amends != replaces:
+        link = {"type": "informed-by", "to": amends, "derived_by": "judge"}
+        payload = {**payload, "links": [*payload.get("links", []), link]}
     kind = "supersede" if replaces else "new"
     return proposals.create(conn, policy, kind=kind, target=replaces, payload=payload, **fields).id  # type: ignore[arg-type]
 

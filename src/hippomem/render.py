@@ -119,7 +119,11 @@ def proposal_full(p: Proposal) -> str:
     payload = p.payload
     if payload.get("inferred"):
         lines.append("  Inferred from the branch history at merge; nobody drafted it. Check the why before accepting.")
-    if p.target:
+    if p.kind == "supersede" and p.target:
+        lines.append(
+            f"  Accepting this takes {p.target} ({payload.get('replaces_title', 'see hippomem_get')}) OUT OF FORCE. Check that it is no longer true."
+        )
+    elif p.target:
         lines.append(f"  Target: {p.target}")
     for key in ("statement", "why", "trade_off"):
         if payload.get(key) and payload.get(key) != payload.get("title"):

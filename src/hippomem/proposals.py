@@ -76,6 +76,9 @@ def create(
     if source not in SOURCES:
         raise ValueError(f"unknown proposal source {source!r}")
     _validate(conn, kind, payload, target)
+    if kind == "supersede" and target:
+        # So whoever reviews it sees, in words, what leaves force (BD-50).
+        payload = {**payload, "replaces_title": decisions.get(conn, target).title}
     with db.transaction(conn):
         proposal_id = db.next_id(conn, "P")
         conn.execute(

@@ -192,3 +192,26 @@ def test_get_shows_the_lineage_with_dates(conn, monkeypatch):
     assert f"→ {first}  Batches of 100: from 2026-01-20 until 2026-02-23" in text
     assert f"{second}  One by one, 20 at a time: from 2026-02-23 (in force)" in text
     assert [d.id for d in search.lineage(conn, second)] == [first, second]
+
+
+def test_a_decision_that_stays_true_is_amended_not_superseded(conn, judge_stub):
+    keys = accepted_decision(conn, "Payout requests carry idempotency keys for bulk payouts", "duplicate payouts incident")
+    b = branch(conn, "feat/individual")
+    d = add(conn, b, "Send payouts one by one, 20 at a time", "limit raised to 50/s")
+    drafts.mark_backed(conn, b, "c1", [])
+    judge_stub.reply = {"drafts": [{"id": d, "verdict": "built", "amends": keys, "why": "limit raised", "files": []}]}
+    p = proposals.get(conn, merge(conn, "feat/individual")["proposals"][0])
+    assert p.kind == "new" and {"type": "informed-by", "to": keys, "derived_by": "judge"} in p.payload["links"]
+    new = proposals.accept(conn, POLICY, p.id, ALEX)
+    assert decisions.get(conn, keys).status == "accepted"
+    assert decisions.Link("informed-by", keys) in decisions.get(conn, new).links
+
+
+def test_a_supersession_tells_the_reviewer_what_leaves_force(conn):
+    from hippomem import render
+
+    old = accepted_decision(conn, "Batches of 100", "5 requests a second")
+    p = proposals.create(
+        conn, POLICY, kind="supersede", target=old, payload={"title": "One by one", "why": "limit raised"}, source="agent", proposed_by="@sam"
+    )
+    assert f"takes {old} (Batches of 100) OUT OF FORCE" in render.proposal_full(p)

@@ -106,6 +106,7 @@ record ids, not claims; ignore them. Return one JSON object and nothing else:
   "contradicts": ["<claims that contradict an answer-key record>"],
   "extra": ["<implementation details or context the answer key doesn't cover, but doesn't contradict>"],
   "replaces": "<answer-key id this proposal says it replaces, or null>",
+  "replaces_correct": true | false | null,  // if it takes a decision out of force: does the answer key say that decision was replaced? null if it replaces nothing
   "notes": "<one sentence>"
 }}"""
 

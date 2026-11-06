@@ -110,6 +110,8 @@ def open_proposals(box: Sandbox) -> list[sqlite3.Row]:
 def proposal_text(p: sqlite3.Row) -> str:
     payload = json.loads(p["payload"])
     lines = [f"Kind: {p['kind']}" + (f" (target {p['target']})" if p["target"] else ""), f"Title: {payload.get('title', '')}"]
+    if p["kind"] == "supersede":
+        lines.append(f"Accepting it takes this decision out of force: {payload.get('replaces_title', p['target'])}")
     for key in ("statement", "why", "trade_off"):
         if payload.get(key):
             lines.append(f"{key.replace('_', '-').capitalize()}: {payload[key]}")
@@ -146,7 +148,9 @@ def decide(box: Sandbox, actors: list[str], proposal_id: str, accept: bool, note
 
 
 def is_good(grade: dict) -> bool:
-    return bool(grade.get("match")) and bool(grade.get("statement_correct")) and grade.get("why") in ("correct", "partial")
+    """Says what the team decided, for the right reason, and takes nothing out of force that is still true."""
+    says_it = bool(grade.get("match")) and bool(grade.get("statement_correct")) and grade.get("why") in ("correct", "partial")
+    return says_it and grade.get("replaces_correct") is not False
 
 
 def review_week(box: Sandbox, timeline: dict, week: int, grader: grading.Grader, matched: dict[str, str], log: Path) -> None:
