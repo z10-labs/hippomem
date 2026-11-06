@@ -142,6 +142,11 @@ def staleness(box: Sandbox) -> dict:
         status = box.rows("SELECT status FROM decision WHERE id = ?", old_id)[0]["status"]
         linked = bool(box.rows("SELECT 1 FROM link WHERE from_id = ? AND type = 'supersedes' AND to_id = ?", new_id, old_id))
         out[f"{old}→{new}"] = f"{old_id} {status}; {new_id} supersedes it: {'yes' if linked else 'no'}"
+    # The other direction: decisions taken out of force that the team never replaced.
+    by_decision = {memory_id(box, matched, oid): oid for oid in matched}
+    still_true = {d for d, oid in by_decision.items() if d and oid not in {o for o, _ in SUPERSESSIONS}}
+    wrongly = [r["id"] for r in box.rows("SELECT id FROM decision WHERE status = 'superseded'") if r["id"] in still_true]
+    out["taken out of force but still true"] = [f"{d} ({by_decision[d]})" for d in wrongly]
     return out
 
 
