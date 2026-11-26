@@ -196,3 +196,21 @@ def test_event_and_turn_endpoints(client, tokens):
     response = client.post("/api/event", json={"kind": "explode"}, headers={"Authorization": f"Bearer {tokens['@pat']}"})
     assert response.status_code == 400
     assert api(client, tokens["@pat"], "/api/event", {"kind": "close_stale"}) == {"closed": []}
+
+
+def test_workspace_tools_create_link_and_show_work(client, tokens, conn):
+    decision = accepted_decision(conn, "Carts live in Postgres", "one database")
+    text, _ = call_tool(client, tokens["@pat"], "hippomem_project", title="Checkout", system="billing")
+    assert text.startswith("Created PRJ-0001")
+    text, _ = call_tool(client, tokens["@pat"], "hippomem_resource", url="https://www.figma.com/file/abc/Cart", project="Checkout")
+    assert "R-0001" in text and "Figma" in text
+    text, _ = call_tool(
+        client, tokens["@pat"], "hippomem_task", title="Build cart", status="in progress", project="PRJ-0001", links=["R-0001", decision]
+    )
+    assert text.startswith("Created T-0001  Build cart  [task · In progress")
+    text, _ = call_tool(client, tokens["@pat"], "hippomem_workspace", project="checkout")
+    assert "T-0001  Build cart" in text and "R-0001" in text and decision in text
+    text, _ = call_tool(client, tokens["@pat"], "hippomem_item", item_id="T-0001")
+    assert "uses R-0001" in text and f"cites {decision}" in text and "Agent: claude-code" in text
+    text, _ = call_tool(client, tokens["@pat"], "hippomem_task", task_id="T-0001", status="Doing")
+    assert text.startswith("Not saved: task status must be one of")

@@ -33,6 +33,15 @@ and the dead ends already explored.
   engineer, then hippomem_propose with scope "system" or "team".
 - Only call hippomem_decide after your engineer has said yes or no to that proposal. Never accept on
   your own.
+
+The team's workspace (tasks, docs, links and resources, synced with Notion) is here too:
+- Before starting a piece of work, call hippomem_workspace for its project or system: open tasks, the
+  docs that explain it and the resources the team saved. hippomem_workspace_search finds any of them.
+- Keep tasks current as you work: hippomem_task to create one, move it (In progress, In review, Done)
+  or record the branch. Link the decisions it implements (D- ids) and the docs it follows.
+- When you find or are given a useful link (a design, a Pinterest board, a video, a reference doc),
+  save it with hippomem_resource so nobody has to find it again.
+- Workspace items are context, not decisions: a task saying "use Redis" does not override a decision.
 """
 
 
@@ -69,6 +78,7 @@ def create(mem: service.Memory, allowed_hosts: tuple[str, ...] = ()) -> FastMCP:
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=hosts, allowed_origins=[]),
     )
     _register_tools(mcp, mem)
+    _register_workspace_tools(mcp, mem)
     _register_api(mcp, mem)
     return mcp
 
@@ -258,6 +268,158 @@ def _register_tools(mcp: FastMCP, mem: service.Memory) -> None:
             return f"Not recorded: {err}"
 
 
+def _register_workspace_tools(mcp: FastMCP, mem: service.Memory) -> None:
+    @mcp.tool()
+    def hippomem_workspace(ctx: Context, project: str = "", system: str = "", repo: str = "") -> str:
+        """Everything connected to a project or system: open tasks, docs, resources and the decisions involved.
+
+        project: a PRJ- id or a project title. system: a system id. repo: falls back to
+        the repo's systems. With none of them, lists the active projects.
+        """
+        return service.workspace_context(mem, _ctx_actor(mem, ctx), project, system, repo)
+
+    @mcp.tool()
+    def hippomem_workspace_search(text: str, ctx: Context, kind: str = "") -> str:
+        """Find tasks, docs, resources or projects by meaning. kind: task, doc, resource or project (optional)."""
+        return service.workspace_search(mem, _ctx_actor(mem, ctx), text, kind)
+
+    @mcp.tool()
+    def hippomem_item(item_id: str, ctx: Context) -> str:
+        """One task, doc, resource or project in full, with everything it links to."""
+        return service.workspace_item(mem, _ctx_actor(mem, ctx), item_id)
+
+    @mcp.tool()
+    def hippomem_task(
+        ctx: Context,
+        task_id: str = "",
+        title: str | None = None,
+        status: str | None = None,
+        priority: str | None = None,
+        assignee: str | None = None,
+        due: str | None = None,
+        system: str | None = None,
+        branch: str | None = None,
+        notes: str | None = None,
+        project: str = "",
+        links: list[str] | None = None,
+    ) -> str:
+        """Create a task, or update one by passing task_id (T-0001). Only the fields you pass change.
+
+        status: Backlog, To do, In progress, In review, Blocked or Done. priority: Urgent, High,
+        Medium or Low. assignee: a teammate's Notion name or email. due: YYYY-MM-DD.
+        branch: "repo:branch". project: PRJ- id or title. links: docs (DOC-), resources (R-)
+        or decisions (D-) this task uses or implements.
+        """
+        try:
+            return service.save_task(
+                mem,
+                _ctx_actor(mem, ctx),
+                task_id=task_id,
+                title=title,
+                status=status,
+                priority=priority,
+                assignee=assignee,
+                due=due,
+                system=system,
+                branch=branch,
+                notes=notes,
+                project=project,
+                links=links,
+            )
+        except (ValueError, KeyError) as err:
+            return f"Not saved: {err}"
+
+    @mcp.tool()
+    def hippomem_doc(
+        ctx: Context,
+        doc_id: str = "",
+        title: str | None = None,
+        doc_type: str | None = None,
+        status: str | None = None,
+        url: str | None = None,
+        summary: str | None = None,
+        system: str | None = None,
+        project: str = "",
+        links: list[str] | None = None,
+    ) -> str:
+        """Register a doc (a spec, guide, runbook, notes) or update one by doc_id (DOC-0001).
+
+        doc_type: Spec, Guide, Runbook, Notes, Research or ADR. status: Draft, In review,
+        Published or Outdated. url: where it lives if not in Notion (Google Doc, PDF, repo file).
+        links: tasks, resources or decisions (D-) it explains.
+        """
+        try:
+            return service.save_doc(
+                mem,
+                _ctx_actor(mem, ctx),
+                doc_id=doc_id,
+                title=title,
+                doc_type=doc_type,
+                status=status,
+                url=url,
+                summary=summary,
+                system=system,
+                project=project,
+                links=links,
+            )
+        except (ValueError, KeyError) as err:
+            return f"Not saved: {err}"
+
+    @mcp.tool()
+    def hippomem_resource(
+        url: str,
+        ctx: Context,
+        title: str = "",
+        notes: str = "",
+        tags: list[str] | None = None,
+        kind: str | None = None,
+        system: str | None = None,
+        project: str = "",
+        links: list[str] | None = None,
+    ) -> str:
+        """Save a link for the team: a Pinterest board, Figma file, video, article, repo or file.
+
+        The kind is detected from the URL unless you pass it (Link, Pinterest, Figma, Canva,
+        Video, Document, Repo, Image, Notion). notes: why it's useful. Saving a URL that's
+        already saved updates it instead of duplicating it.
+        """
+        try:
+            return service.save_resource(
+                mem,
+                _ctx_actor(mem, ctx),
+                url=url,
+                title=title,
+                notes=notes or None,
+                tags=tags,
+                kind=kind,
+                system=system,
+                project=project,
+                links=links,
+            )
+        except (ValueError, KeyError) as err:
+            return f"Not saved: {err}"
+
+    @mcp.tool()
+    def hippomem_project(title: str, ctx: Context, summary: str = "", system: str = "", status: str = "") -> str:
+        """Start a project in the workspace. Ask your engineer first: projects are how the team organises work."""
+        try:
+            return service.save_project(mem, _ctx_actor(mem, ctx), title=title, summary=summary, system=system, status=status)
+        except (ValueError, KeyError) as err:
+            return f"Not saved: {err}"
+
+    @mcp.tool()
+    def hippomem_connect(a: str, b: str, ctx: Context, remove: bool = False) -> str:
+        """Link two things: any of a task, doc, resource or project (by id), or a decision (D-).
+
+        The direction is worked out for you (a task uses a doc, a doc is part of a project,
+        anything cites a decision). remove=true unlinks them.
+        """
+        try:
+            return service.connect_items(mem, _ctx_actor(mem, ctx), a, b, remove)
+        except (ValueError, KeyError) as err:
+            return f"Not linked: {err}"
+
+
 def _register_api(mcp: FastMCP, mem: service.Memory) -> None:
     def authed(handler: Any) -> Any:
         async def wrapped(request: Request) -> JSONResponse:
@@ -323,3 +485,12 @@ def _register_api(mcp: FastMCP, mem: service.Memory) -> None:
     mcp.custom_route("/api/turn/start", methods=["POST"])(authed(turn_start))
     mcp.custom_route("/api/turn/stop", methods=["POST"])(authed(turn_stop))
     mcp.custom_route("/api/event", methods=["POST"])(authed(event))
+
+    def workspace_view(actor: Actor, body: dict, request: Request) -> dict:
+        return {"text": service.workspace_context(mem, actor, body.get("project", ""), body.get("system", ""), body.get("repo", ""))}
+
+    def workspace_sync(actor: Actor, body: dict, request: Request) -> dict:
+        return {"text": service.workspace_sync(mem)}
+
+    mcp.custom_route("/api/workspace", methods=["GET"])(authed(workspace_view))
+    mcp.custom_route("/api/workspace/sync", methods=["POST"])(authed(workspace_sync))

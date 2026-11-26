@@ -94,7 +94,7 @@ hippomem install git-hooks                  # post-checkout, post-commit, post-m
 
 - **At session start:** a digest with the repo, branch and session to pass to tools; decisions in force for the repo's systems; this branch's draft trail; other branches' drafts on the same systems; up to `max_per_session` proposals and any questions waiting for its engineer.
 - **Before an edit:** decisions covering the file, system-wide rules that apply (team-wide ones are in the digest), open proposals about it, and, when nothing covers a file someone else wrote that has several commits or hasn't been touched for 90 days, a suggestion to ask its author.
-- **Tools:** `hippomem_query`, `hippomem_draft`, `hippomem_drop`, `hippomem_trail`, `hippomem_get`, `hippomem_chain`, `hippomem_list`, `hippomem_systems`, `hippomem_propose`, `hippomem_propose_mapping`, `hippomem_ask_author`, `hippomem_answer`, `hippomem_review`, `hippomem_decide`.
+- **Tools:** `hippomem_query`, `hippomem_draft`, `hippomem_drop`, `hippomem_trail`, `hippomem_get`, `hippomem_chain`, `hippomem_list`, `hippomem_systems`, `hippomem_propose`, `hippomem_propose_mapping`, `hippomem_ask_author`, `hippomem_answer`, `hippomem_review`, `hippomem_decide`. Workspace (tasks, docs, resources; see [workspace.md](workspace.md)): `hippomem_workspace`, `hippomem_workspace_search`, `hippomem_item`, `hippomem_task`, `hippomem_doc`, `hippomem_resource`, `hippomem_project`, `hippomem_connect`.
 - **At the end of every turn:** if dependencies, schema or infrastructure files changed and nothing was drafted, one nudge to draft.
 - **Identity:** everything it writes is recorded as `@alex via claude-code`.
 

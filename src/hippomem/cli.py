@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -93,10 +94,46 @@ def cmd_serve(args: argparse.Namespace) -> int:
     closed = lifecycle.close_stale(conn, config.stale_after_days)
     if closed:
         print(f"Closed {len(closed)} stale branches: {', '.join(closed)}")
-    mem = service.Memory(conn=conn, config=config)
+    from hippomem import notion
+
+    mem = service.Memory(conn=conn, config=config, notion_client=notion.client_for(config.notion))
+    if mem.notion_client is not None:
+        _start_workspace_sync(mem)
+        print(f"Syncing the workspace with Notion every {config.notion.sync_minutes} minutes")
+    elif config.notion.enabled:
+        print(f"Notion is configured but {config.notion.token_env} is not set: workspace changes stay local until it is")
     app = server.create(mem).streamable_http_app()
     print(f"Hippomem serving on {config.url} (MCP at {config.url}/mcp)")
     uvicorn.run(app, host=config.host, port=config.port, log_level="warning")
+    return 0
+
+
+def _start_workspace_sync(mem: Any) -> None:
+    """Sync with Notion now and then every sync_minutes, in the background.
+    A failed sync is logged and retried next time; it never stops the server."""
+    import threading
+
+    from hippomem import service
+
+    def loop() -> None:
+        while True:
+            try:
+                print(service.workspace_sync(mem), flush=True)
+            except Exception as err:  # noqa: BLE001 - the loop must survive anything
+                print(f"Workspace sync failed: {err}", file=sys.stderr, flush=True)
+            time.sleep(max(1, mem.config.notion.sync_minutes) * 60)
+
+    threading.Thread(target=loop, name="workspace-sync", daemon=True).start()
+
+
+def cmd_workspace_sync(args: argparse.Namespace) -> int:
+    print(_call(args, "POST", "/api/workspace/sync", json={})["text"])
+    return 0
+
+
+def cmd_workspace_show(args: argparse.Namespace) -> int:
+    params = {k: v for k, v in (("project", args.project), ("system", args.system), ("repo", args.repo)) if v}
+    print(_call(args, "GET", "/api/workspace", params=params)["text"])
     return 0
 
 
@@ -315,6 +352,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--repo")
     p.set_defaults(func=cmd_branch_close)
     branch.add_parser("close-stale", help="close branches inactive longer than branches.stale_after_days").set_defaults(func=cmd_branch_close_stale)
+
+    ws = sub.add_parser("workspace", help="the team's tasks, docs and resources (synced with Notion)").add_subparsers(
+        dest="workspace_command", required=True
+    )
+    ws.add_parser("sync", help="push local changes to Notion, then pull everything").set_defaults(func=cmd_workspace_sync)
+    p = ws.add_parser("show", help="projects, or one project's or system's tasks, docs and resources")
+    p.add_argument("--project", help="PRJ- id or project title")
+    p.add_argument("--system")
+    p.add_argument("--repo")
+    p.set_defaults(func=cmd_workspace_show)
     return parser
 
 

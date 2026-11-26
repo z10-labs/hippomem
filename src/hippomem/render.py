@@ -8,6 +8,7 @@ are never mistaken for decisions.
 from __future__ import annotations
 
 from hippomem import decisions as dec
+from hippomem import workspace as ws
 from hippomem.explored import Explored
 from hippomem.proposals import Proposal
 from hippomem.search import DecisionHit, DraftHit, ExploredHit, Results
@@ -161,3 +162,83 @@ def chain(tree: dict) -> str:
     lines.append("Would be affected if it changed:" if tree["affects"] else "Would be affected if it changed: nothing recorded")
     walk(tree["affects"], 1)
     return "\n".join(lines)
+
+
+# --- workspace ------------------------------------------------------------------
+
+
+def item_line(i: ws.Item) -> str:
+    """One workspace item, labelled so it is never read as a decision."""
+    tags = [i.kind]
+    if i.status:
+        tags.append(i.status)
+    if i.category and i.kind != "task":
+        tags.append(i.category)
+    if i.priority:
+        tags.append(i.priority)
+    if i.assignee:
+        tags.append(f"assignee {i.assignee}")
+    if i.due:
+        tags.append(f"due {i.due[:10]}")
+    if i.system_id:
+        tags.append(i.system_id)
+    if i.notion_pending:
+        tags.append("not yet in Notion")
+    line = f"{i.id}  {i.title}  [{' · '.join(tags)}]"
+    if i.url:
+        line += f"  {i.url}"
+    return line
+
+
+def item_full(i: ws.Item, links: list[ws.Link], titles: dict[str, str]) -> str:
+    lines = [item_line(i)]
+    if i.body:
+        lines.append(f"  {'Notes' if i.kind == 'resource' else 'Summary'}: {i.body}")
+    if i.tags:
+        lines.append(f"  Tags: {', '.join(i.tags)}")
+    if i.branch:
+        lines.append(f"  Branch: {i.branch}")
+    if i.agent:
+        lines.append(f"  {'Added by' if i.kind == 'resource' else 'Agent'}: {i.agent}")
+    if i.notion_url:
+        lines.append(f"  Notion: {i.notion_url}")
+    for lk in links:
+        other = lk.to_id if lk.from_id == i.id else lk.from_id
+        verb = lk.type if lk.from_id == i.id else {"part-of": "contains", "uses": "used by", "cites": "cited by", "relates": "relates"}[lk.type]
+        lines.append(f"  {verb} {other}  {titles.get(other, '')}".rstrip())
+    return "\n".join(lines)
+
+
+def workspace_context(c: ws.Context) -> str:
+    if c.empty:
+        where = c.project.title if c.project else c.system or "this"
+        return f"Nothing in the workspace for {where} yet. Add tasks, docs and resources with hippomem_task, hippomem_doc and hippomem_resource."
+    lines = []
+    if c.project:
+        lines.append(item_line(c.project))
+        if c.project.body:
+            lines.append(f"  {c.project.body}")
+    else:
+        lines.append(f"Workspace for system {c.system!r}")
+    sections = (
+        ("Projects", c.projects),
+        ("Open tasks", c.tasks),
+        ("Docs", c.docs),
+        ("Resources", c.resources),
+    )
+    for heading, group in sections:
+        if group:
+            lines.append("")
+            lines.append(f"{heading} ({len(group)}):")
+            lines.extend(item_line(i) for i in group)
+    if c.decisions:
+        lines.append("")
+        lines.append("Decisions in force here (follow these; hippomem_get for the full record):" if not c.project else "Decisions this work cites:")
+        lines.extend(decision_line(d) for d in c.decisions)
+    return "\n".join(lines)
+
+
+def workspace_hits(hits: list[tuple[ws.Item, float]]) -> str:
+    if not hits:
+        return "No workspace items matched. Try other words, or hippomem_workspace for everything in a project or system."
+    return "\n".join(item_line(i) for i, _ in hits)

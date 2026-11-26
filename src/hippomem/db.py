@@ -305,6 +305,51 @@ MIGRATIONS: list[str] = [
     WHERE version = (SELECT current_version FROM decision WHERE id = decision_version.decision_id)
       AND (SELECT status FROM decision WHERE id = decision_version.decision_id) = 'superseded';
     """,
+    # 3: the workspace (BD-51 to BD-56). Projects, tasks, docs and resources the
+    # team works with, mirrored from Notion, linked to each other and to
+    # decisions. They are context, never decisions: nothing here is reviewed
+    # or put in force.
+    """
+    CREATE TABLE workspace_item (
+        id              TEXT PRIMARY KEY,            -- PRJ-0001, T-0001, DOC-0001, R-0001
+        kind            TEXT NOT NULL CHECK (kind IN ('project', 'task', 'doc', 'resource')),
+        title           TEXT NOT NULL,
+        status          TEXT NOT NULL DEFAULT '',
+        category        TEXT NOT NULL DEFAULT '',    -- doc type, or resource kind (pinterest, figma, ...)
+        url             TEXT NOT NULL DEFAULT '',    -- the resource itself, or where an external doc lives
+        body            TEXT NOT NULL DEFAULT '',    -- summary or notes
+        system_id       TEXT NOT NULL DEFAULT '',    -- a Hippomem system id; may name one not defined yet
+        priority        TEXT NOT NULL DEFAULT '',
+        assignee        TEXT NOT NULL DEFAULT '',
+        agent           TEXT NOT NULL DEFAULT '',
+        due             TEXT NOT NULL DEFAULT '',
+        branch          TEXT NOT NULL DEFAULT '',    -- repo:branch
+        tags            TEXT NOT NULL DEFAULT '[]',
+        archived        INTEGER NOT NULL DEFAULT 0,
+        notion_page_id  TEXT UNIQUE,
+        notion_url      TEXT NOT NULL DEFAULT '',
+        notion_pending  INTEGER NOT NULL DEFAULT 0,  -- changed here, not yet written to Notion
+        created_by      TEXT NOT NULL,
+        created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL,
+        embedding       BLOB
+    );
+    CREATE INDEX workspace_item_system ON workspace_item (system_id);
+
+    -- Joins a workspace item to another item or to a decision (D-).
+    -- source says where the link is held: 'notion' links are replaced on every
+    -- pull; 'hippomem' links have no Notion field and are kept.
+    CREATE TABLE workspace_link (
+        from_id     TEXT NOT NULL REFERENCES workspace_item(id),
+        type        TEXT NOT NULL CHECK (type IN ('part-of', 'uses', 'cites', 'relates')),
+        to_id       TEXT NOT NULL,
+        source      TEXT NOT NULL DEFAULT 'hippomem' CHECK (source IN ('notion', 'hippomem')),
+        created_by  TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        PRIMARY KEY (from_id, to_id)
+    );
+    CREATE INDEX workspace_link_to ON workspace_link (to_id);
+    """,
 ]
 
 

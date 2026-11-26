@@ -281,6 +281,7 @@ We prove the concept on our own machines first. The end goal is a remote memory 
 | 2026-10-28 | Any agent using Hippomem can bring pending proposals to its engineer for approval, within interruption limits |
 | 2026-10-28 | No transcript sweeper for now; Hippomem does not read session transcripts |
 | 2026-10-28 | Decisions attach to systems mapped from repo + path patterns; one system can span many repos; agents draft the mapping, engineers confirm |
+| 2026-11-26 | A team workspace (projects, tasks, docs, resources) lives beside decisions and syncs with Notion; its items are context, never decisions ([workspace.md](workspace.md), BD-51) |
 
 ## History
 

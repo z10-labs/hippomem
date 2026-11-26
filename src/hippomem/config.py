@@ -18,6 +18,14 @@ engineer wrote them.
     [branches]
     stale_after_days = 30
 
+    [notion]                   # optional: sync the team workspace with Notion
+    projects = "<data source id>"
+    tasks = "<data source id>"
+    docs = "<data source id>"
+    resources = "<data source id>"
+    token_env = "NOTION_TOKEN"
+    sync_minutes = 5
+
     [[systems]]
     id = "billing"
     name = "Billing"
@@ -35,6 +43,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from hippomem import actors, db, systems
+from hippomem.notion import NotionConfig
 from hippomem.policy import Policy
 
 DEFAULT_PORT = 8765
@@ -58,6 +67,7 @@ class Config:
     max_per_session: int = 2
     stale_after_days: int = 30
     systems: tuple[SystemSpec, ...] = ()
+    notion: NotionConfig = field(default_factory=NotionConfig)
 
     @property
     def url(self) -> str:
@@ -98,6 +108,23 @@ def parse(raw: dict) -> Config:
         max_per_session=int(raw.get("review", {}).get("max_per_session", 2)),
         stale_after_days=int(raw.get("branches", {}).get("stale_after_days", 30)),
         systems=tuple(_system(s) for s in raw.get("systems", ())),
+        notion=_notion(raw.get("notion", {})),
+    )
+
+
+def _notion(raw: dict) -> NotionConfig:
+    if "token" in raw:
+        raise ValueError("put the Notion token in an environment variable (token_env), not hippomem.toml")
+    unknown = set(raw) - {"projects", "tasks", "docs", "resources", "token_env", "sync_minutes"}
+    if unknown:
+        raise ValueError(f"unknown [notion] settings: {', '.join(sorted(unknown))}")
+    return NotionConfig(
+        projects=str(raw.get("projects", "")),
+        tasks=str(raw.get("tasks", "")),
+        docs=str(raw.get("docs", "")),
+        resources=str(raw.get("resources", "")),
+        token_env=str(raw.get("token_env", "NOTION_TOKEN")),
+        sync_minutes=int(raw.get("sync_minutes", 5)),
     )
 
 
@@ -152,6 +179,16 @@ max_per_session = 2        # pending proposals an agent may raise with its engin
 
 [branches]
 stale_after_days = 30
+
+# The team workspace in Notion (tasks, docs, resources). The token is read from
+# the environment variable named in token_env, never from this file.
+# [notion]
+# projects = "<Projects data source id>"
+# tasks = "<Tasks data source id>"
+# docs = "<Docs data source id>"
+# resources = "<Resources data source id>"
+# token_env = "NOTION_TOKEN"
+# sync_minutes = 5
 
 # [[systems]]
 # id = "billing"

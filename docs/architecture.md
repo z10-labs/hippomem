@@ -10,6 +10,7 @@ How the proof of concept is built. What Hippomem is and why is in [hippomem.md](
  Claude Code ──MCP over HTTP (/mcp)──────────────────────────► tools: query, draft, propose, decide, …
    hooks: hippomem hook session-start|prompt|pre-edit|stop ──► JSON API (/api): session, lookup, turn
  git hooks: post-checkout|post-commit|post-merge ────────────► JSON API (/api/event)
+ Notion (Projects, Tasks, Docs, Resources) ◄──two-way sync, every few minutes──► workspace
  hippomem CLI (query, review, accept, …) ────────────────────► JSON API
                                                                 │
                                                                 ├── SQLite memory file (WAL)
@@ -35,6 +36,8 @@ Every request carries a bearer token. Engineers, reviewer agents and admins each
 | `lifecycle.py` | Git events: checkout, commit, merge, close, stale |
 | `sessions.py` | Session digest, before-edit lookup, end-of-turn check, surfacing proposals, author questions |
 | `judge.py` | The one place a model is asked to judge |
+| `workspace.py` | Projects, tasks, docs and resources; links between them and to decisions; search and context ([workspace.md](workspace.md)) |
+| `notion.py` | Two-way sync of the workspace with the team's Notion databases |
 | `service.py` | Operations shared by MCP tools and the JSON API, with usage logging |
 | `server.py` | MCP tools, server instructions, JSON API |
 | `hooks.py`, `gitinfo.py` | Client side: Claude Code hooks, git hooks, installers |

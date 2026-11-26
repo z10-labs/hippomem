@@ -14,7 +14,7 @@ import sqlite3
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 
-from hippomem import actors, db, decisions, drafts, proposals, render, systems
+from hippomem import actors, db, decisions, drafts, proposals, render, systems, workspace
 from hippomem.policy import Actor, Policy, refusal
 
 MAX_DIGEST_DECISIONS = 15
@@ -115,6 +115,15 @@ def digest(conn: sqlite3.Connection, policy: Policy, actor: Actor, session: Sess
         lines.extend(render.decision_line(d) for d in in_force[:MAX_DIGEST_DECISIONS])
         if len(in_force) > MAX_DIGEST_DECISIONS:
             lines.append(f"... and {len(in_force) - MAX_DIGEST_DECISIONS} more: hippomem_list or hippomem_query")
+
+    open_tasks = workspace.items(conn, kind="task", systems=scope, open_only=True) if scope else []
+    open_tasks.sort(key=lambda t: workspace.PRIORITIES.index(t.priority) if t.priority in workspace.PRIORITIES else len(workspace.PRIORITIES))
+    if open_tasks:
+        lines.append("")
+        lines.append(f"Open tasks for these systems ({len(open_tasks)}; hippomem_workspace for docs and resources, hippomem_task to update):")
+        lines.extend(render.item_line(t) for t in open_tasks[: workspace.OPEN_TASKS_IN_DIGEST])
+        if len(open_tasks) > workspace.OPEN_TASKS_IN_DIGEST:
+            lines.append(f"... and {len(open_tasks) - workspace.OPEN_TASKS_IN_DIGEST} more")
 
     if branch:
         trail = drafts.trail(conn, branch.id)

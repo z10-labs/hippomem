@@ -10,10 +10,11 @@ import json
 import re
 import sqlite3
 import threading
+from typing import Any
 from dataclasses import dataclass, field
 
 from hippomem import config as cfg
-from hippomem import db, decisions, drafts, lifecycle, proposals, render, search, sessions, systems
+from hippomem import db, decisions, drafts, lifecycle, notion, proposals, render, search, sessions, systems, workspace
 from hippomem.policy import Actor
 
 
@@ -24,6 +25,9 @@ class Memory:
     # One connection serves every request; this keeps requests from
     # interleaving inside a transaction.
     lock: threading.RLock = field(default_factory=threading.RLock)
+    # Set when [notion] is configured and a token is present; workspace writes
+    # then go to Notion as well.
+    notion_client: notion.Client | None = None
 
 
 RECORD_ID = re.compile(r"\b[DXPQ]-\d{4,}\b")
@@ -77,6 +81,8 @@ def get_decision(mem: Memory, actor: Actor, decision_id: str) -> str:
         lines = [render.decision_full(d), *render.lineage(search.lineage(mem.conn, decision_id), decision_id)]
         for ev in decisions.evidence_for(mem.conn, decision_id):
             lines.append(f"  Evidence: {ev['kind']} {ev['ref']} {ev['note']}".rstrip())
+        for item in workspace.for_decision(mem.conn, decision_id):
+            lines.append(f"  Work citing it: {render.item_line(item)}")
         return "\n".join(lines)
 
 
@@ -380,3 +386,252 @@ def git_event(mem: Memory, actor: Actor, body: dict) -> dict:
         if kind == "close_stale":
             return {"closed": lifecycle.close_stale(mem.conn, mem.config.stale_after_days)}
         raise ValueError(f"unknown event kind {kind!r}")
+
+
+# --- workspace ----------------------------------------------------------------
+
+
+def _label(actor: Actor) -> str:
+    return f"{actor.id} via {actor.agent}" if actor.agent else actor.id
+
+
+def _push(mem: Memory, item_id: str) -> str:
+    """Write an item to Notion now if we can. Returns a note for the caller
+    when it could not; the item stays pending and the next sync retries."""
+    if mem.notion_client is None:
+        return "" if not mem.config.notion.enabled else "\nNot in Notion yet: no Notion token on the server; it will go on the next sync."
+    item = workspace.get(mem.conn, item_id)
+    if not mem.config.notion.source(item.kind):
+        return ""
+    try:
+        notion.push(mem.conn, mem.notion_client, mem.config.notion, item_id)
+    except notion.NotionError as err:
+        return f"\nSaved in Hippomem, but writing to Notion failed ({err}); the next sync retries."
+    return ""
+
+
+def _link_all(mem: Memory, actor: Actor, item_id: str, others: list[str]) -> list[str]:
+    """Link an item to each of `others` (ids, or project titles). Returns problems."""
+    problems = []
+    for other in others:
+        other = other.strip()
+        if not other:
+            continue
+        try:
+            if not workspace.ITEM_ID.match(other.upper()) and not workspace.DECISION_ID.fullmatch(other.upper()):
+                other = workspace.find_project(mem.conn, other).id
+            workspace.connect(mem.conn, item_id, other, _label(actor))
+        except (KeyError, ValueError) as err:
+            problems.append(f"not linked to {other}: {err}")
+    return problems
+
+
+def _saved(mem: Memory, verb: str, item_id: str, problems: list[str]) -> str:
+    note = _push(mem, item_id)
+    item = workspace.get(mem.conn, item_id)
+    text = f"{verb} {render.item_line(item)}"
+    if item.notion_url:
+        text += f"\n  Notion: {item.notion_url}"
+    if problems:
+        text += "\n" + "\n".join(f"  ! {p}" for p in problems)
+    return text + note
+
+
+def workspace_context(mem: Memory, actor: Actor, project: str = "", system: str = "", repo: str = "") -> str:
+    with mem.lock:
+        record_usage(mem, actor, "workspace", repo, project=project, system=system)
+        if not project and not system and repo:
+            found = systems.systems_for(mem.conn, repo)
+            if not found:
+                return f"Repo {repo!r} isn't mapped to a system, so there is no workspace for it. Pass project= or system=."
+            return "\n\n".join(render.workspace_context(workspace.context(mem.conn, system=s)) for s in found)
+        if not project and not system:
+            projects = workspace.items(mem.conn, kind="project", open_only=True)
+            if not projects:
+                return "No projects in the workspace yet."
+            return (
+                "Projects:\n"
+                + "\n".join(render.item_line(p) for p in projects)
+                + "\nPass project=<id or title> for one project's tasks, docs and resources."
+            )
+        try:
+            return render.workspace_context(workspace.context(mem.conn, project=project, system=system))
+        except (KeyError, ValueError) as err:
+            return f"No workspace: {err}"
+
+
+def workspace_search(mem: Memory, actor: Actor, text: str, kind: str = "") -> str:
+    with mem.lock:
+        hits = workspace.search(mem.conn, text, kind=kind)
+        record_usage(mem, actor, "workspace_search", text=text, kind=kind, shown=[i.id for i, _ in hits])
+        return render.workspace_hits(hits)
+
+
+def workspace_item(mem: Memory, actor: Actor, item_id: str) -> str:
+    with mem.lock:
+        record_usage(mem, actor, "workspace_get", item=item_id)
+        try:
+            item = workspace.get(mem.conn, item_id)
+        except KeyError:
+            return f"No workspace item {item_id}."
+        links = workspace.links_of(mem.conn, item.id)
+        titles = {}
+        for other in {lk.to_id if lk.from_id == item.id else lk.from_id for lk in links}:
+            try:
+                titles[other] = workspace.get(mem.conn, other).title if workspace.ITEM_ID.match(other) else decisions.get(mem.conn, other).title
+            except KeyError:
+                continue
+        return render.item_full(item, links, titles)
+
+
+def save_task(
+    mem: Memory,
+    actor: Actor,
+    *,
+    task_id: str = "",
+    title: str | None = None,
+    status: str | None = None,
+    priority: str | None = None,
+    assignee: str | None = None,
+    due: str | None = None,
+    system: str | None = None,
+    branch: str | None = None,
+    notes: str | None = None,
+    project: str = "",
+    links: list[str] | None = None,
+) -> str:
+    """Create a task, or change one when task_id is given. `links` are docs,
+    resources or decisions (D-) the task uses or implements."""
+    fields: dict[str, Any] = {
+        "title": title,
+        "status": status,
+        "priority": priority,
+        "assignee": assignee,
+        "due": due,
+        "system_id": system,
+        "branch": branch,
+        "body": notes,
+    }
+    if actor.agent:
+        fields["agent"] = actor.agent
+    with mem.lock:
+        if task_id:
+            current = workspace.get(mem.conn, task_id)
+            if current.kind != "task":
+                raise ValueError(f"{current.id} is a {current.kind}, not a task")
+            item = workspace.update(mem.conn, current.id, **fields)
+            verb = "Updated"
+        else:
+            if not title:
+                raise ValueError("a new task needs a title")
+            fields.pop("title")
+            item = workspace.create(mem.conn, "task", title, _label(actor), **fields)
+            verb = "Created"
+        problems = _link_all(mem, actor, item.id, [project, *(links or ())])
+        record_usage(mem, actor, "workspace_task", item=item.id, created=verb == "Created")
+        return _saved(mem, verb, item.id, problems)
+
+
+def save_doc(
+    mem: Memory,
+    actor: Actor,
+    *,
+    doc_id: str = "",
+    title: str | None = None,
+    doc_type: str | None = None,
+    status: str | None = None,
+    url: str | None = None,
+    summary: str | None = None,
+    system: str | None = None,
+    project: str = "",
+    links: list[str] | None = None,
+) -> str:
+    fields: dict[str, Any] = {"title": title, "category": doc_type, "status": status, "url": url, "body": summary, "system_id": system}
+    with mem.lock:
+        if doc_id:
+            current = workspace.get(mem.conn, doc_id)
+            if current.kind != "doc":
+                raise ValueError(f"{current.id} is a {current.kind}, not a doc")
+            item = workspace.update(mem.conn, current.id, **fields)
+            verb = "Updated"
+        else:
+            if not title:
+                raise ValueError("a new doc needs a title")
+            fields.pop("title")
+            item = workspace.create(mem.conn, "doc", title, _label(actor), **fields)
+            verb = "Created"
+        problems = _link_all(mem, actor, item.id, [project, *(links or ())])
+        record_usage(mem, actor, "workspace_doc", item=item.id, created=verb == "Created")
+        return _saved(mem, verb, item.id, problems)
+
+
+def save_resource(
+    mem: Memory,
+    actor: Actor,
+    *,
+    url: str,
+    title: str = "",
+    notes: str | None = None,
+    tags: list[str] | None = None,
+    kind: str | None = None,
+    system: str | None = None,
+    project: str = "",
+    links: list[str] | None = None,
+) -> str:
+    """Save a link. The same URL saved twice updates the first record instead of duplicating it."""
+    url = url.strip()
+    if not url:
+        raise ValueError("a resource needs a url")
+    with mem.lock:
+        existing = workspace.find_by_url(mem.conn, url)
+        if existing:
+            merged_tags = tuple(dict.fromkeys([*existing.tags, *(tags or ())]))
+            item = workspace.update(mem.conn, existing.id, title=title or None, body=notes, tags=merged_tags, category=kind, system_id=system)
+            verb = "Already saved; updated"
+        else:
+            item = workspace.create(
+                mem.conn,
+                "resource",
+                title or url,
+                _label(actor),
+                url=url,
+                body=notes,
+                tags=tags or (),
+                category=kind,
+                system_id=system,
+                agent=_label(actor),
+            )
+            verb = "Saved"
+        problems = _link_all(mem, actor, item.id, [project, *(links or ())])
+        record_usage(mem, actor, "workspace_resource", item=item.id, created=verb == "Saved")
+        return _saved(mem, verb, item.id, problems)
+
+
+def save_project(mem: Memory, actor: Actor, *, title: str, summary: str = "", system: str = "", status: str = "") -> str:
+    with mem.lock:
+        item = workspace.create(mem.conn, "project", title, _label(actor), body=summary, system_id=system, status=status or None)
+        record_usage(mem, actor, "workspace_project", item=item.id)
+        return _saved(mem, "Created", item.id, [])
+
+
+def connect_items(mem: Memory, actor: Actor, a: str, b: str, remove: bool = False) -> str:
+    with mem.lock:
+        if remove:
+            from_id, _, _ = workspace.link_shape(mem.conn, a, b)
+            gone = workspace.disconnect(mem.conn, a, b)
+            note = _push(mem, from_id) if gone else ""
+            return (f"Unlinked {a} and {b}." if gone else f"{a} and {b} weren't linked.") + note
+        link = workspace.connect(mem.conn, a, b, _label(actor))
+        record_usage(mem, actor, "workspace_link", link=[link.from_id, link.type, link.to_id])
+        note = _push(mem, link.from_id) if workspace.ITEM_ID.match(link.from_id) else ""
+        return f"Linked: {link.from_id} {link.type} {link.to_id}." + note
+
+
+def workspace_sync(mem: Memory) -> str:
+    """Push local changes to Notion, then pull everything from it."""
+    if not mem.config.notion.enabled:
+        return "Notion isn't configured: add a [notion] block to hippomem.toml."
+    if mem.notion_client is None:
+        return f"No Notion token: set {mem.config.notion.token_env}."
+    with mem.lock:
+        return notion.sync(mem.conn, mem.notion_client, mem.config.notion).summary()

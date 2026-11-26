@@ -15,12 +15,14 @@ Hippomem keeps that reasoning and returns it at the moment someone is about to d
 - **One memory for a team, not a repo.** Decisions attach to *systems* (a service, a module, a shared library), and one system can span many repos.
 - **Decisions are drafted during work and confirmed later.** Work on a branch leaves a draft trail, reversals included. At merge, drafts that were actually built become proposals, and reversed ones become rejected alternatives. Decisions covering a whole module or service are confirmed directly by an engineer.
 - **Agents propose; acceptance follows rules.** Engineers and agents can review. Heavy decisions need an engineer, and nobody approves their own proposal.
+- **The work around it is here too.** Projects, tasks, docs and resources (links, Pinterest boards, Figma files, documents) sync two ways with the team's Notion, so every agent sees the same work, linked to the decisions it implements. See [docs/workspace.md](docs/workspace.md).
 - **Reading is triggered.** A digest at session start, a lookup before each edit, and server instructions, so the agent doesn't have to remember to ask.
 
 ## Docs
 
 - [docs/hippomem.md](docs/hippomem.md): definition, scope, decision lifecycle, plan
 - [docs/using-hippomem.md](docs/using-hippomem.md): how a team installs and uses it
+- [docs/workspace.md](docs/workspace.md): tasks, docs and resources, synced with Notion
 - [docs/build-decisions.md](docs/build-decisions.md): decisions made while building it
 
 ## Development
